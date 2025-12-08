@@ -973,7 +973,7 @@ def save_text_tree(call_graph, output_dir, project_name):
         f.write(text_tree_content)
     print(f"Text tree saved to {file_name}")
 
-def save_file_info_json(file_infos, output_dir, project_name):
+def save_file_info_json(file_infos, output_dir, project_name, project_dir):
     """保存文件信息为JSON"""
     # 简化文件信息，只保留functions和includes字段
     simplified_file_infos = []
@@ -991,6 +991,41 @@ def save_file_info_json(file_infos, output_dir, project_name):
     with open(file_name, "w") as f:
         json.dump(simplified_file_infos, f, indent=2)
     print(f"File info saved to {file_name}")
+    
+    # 生成项目文件树
+    generate_project_tree(project_dir, project_output_dir)
+
+def generate_project_tree(project_dir, output_dir):
+    """生成项目文件树"""
+    def walk_directory(directory, prefix=""):
+        entries = os.listdir(directory)
+        entries.sort()
+        tree_lines = []
+        
+        for i, entry in enumerate(entries):
+            path = os.path.join(directory, entry)
+            is_last = i == len(entries) - 1
+            connector = "└── " if is_last else "├── "
+            
+            if os.path.isdir(path):
+                tree_lines.append(f"{prefix}{connector}{entry}/")
+                extension = "    " if is_last else "│   "
+                tree_lines.extend(walk_directory(path, prefix + extension))
+            else:
+                tree_lines.append(f"{prefix}{connector}{entry}")
+        
+        return tree_lines
+    
+    # 生成文件树文本
+    tree_lines = [os.path.basename(project_dir) + "/"]
+    tree_lines.extend(walk_directory(project_dir))
+    
+    # 保存文件树到文件
+    file_name = os.path.join(output_dir, "project_tree.txt")
+    with open(file_name, "w") as f:
+        f.write("\n".join(tree_lines))
+    
+    print(f"Project tree saved to {file_name}")
 
 def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
     """保存结构体信息为JSON"""
@@ -1213,7 +1248,7 @@ if __name__ == "__main__":
     save_json(full_call_graph, output_dir, project_name)
     
     # 保存文件信息 JSON
-    save_file_info_json(file_infos, output_dir, project_name)
+    save_file_info_json(file_infos, output_dir, project_name, project_dir)
     
     # 保存结构体信息 JSON
     save_struct_info_json(all_struct_fields, all_struct_uses, output_dir, project_name)
