@@ -6,6 +6,7 @@
       <Toolset>
         <Cads>
           <IncludePath>./include;./cmsis;./device;../lib</IncludePath>
+          <Define>DEBUG=1;USE_FEATURE_A;MAX_BUFFER_SIZE=1024</Define>
         </Cads>
       </Toolset>
     </Target>

@@ -627,6 +627,79 @@ def extract_include_paths_from_project(project_dir):
     
     return include_paths
 
+def extract_preprocessor_macros_from_project(project_dir):
+    """从项目文件中提取预处理宏定义"""
+    macros = {}
+    
+    # 查找Keil项目文件
+    for root, dirs, files in os.walk(project_dir):
+        for file in files:
+            if file.endswith(('.uvproj', '.uvprojx')):
+                project_file = os.path.join(root, file)
+                try:
+                    # 解析XML文件
+                    tree = ET.parse(project_file)
+                    root_element = tree.getroot()
+                    
+                    # 查找预处理宏定义
+                    # 在Keil项目文件中，宏定义通常在以下位置：
+                    # <Project><Targets><Target><TargetName><Toolset><Cads><Define>
+                    for define_element in root_element.iter('Define'):
+                        define_text = define_element.text
+                        if define_text:
+                            # 分割多个宏定义（通常用分号分隔）
+                            # Keil使用分号分隔宏定义
+                            macro_definitions = define_text.split(';')
+                            for macro_def in macro_definitions:
+                                macro_def = macro_def.strip()
+                                if macro_def:
+                                    # 分离宏名和值（如果有的话）
+                                    if '=' in macro_def:
+                                        macro_name, macro_value = macro_def.split('=', 1)
+                                        macros[macro_name.strip()] = macro_value.strip()
+                                    else:
+                                        # 没有指定值的宏定义，默认为1
+                                        macros[macro_def] = "1"
+                except Exception as e:
+                    # 忽略解析错误
+                    pass
+    
+    # 查找Eclipse CDT项目文件(.cproject)
+    abs_project_dir = os.path.abspath(project_dir)
+    for root, dirs, files in os.walk(abs_project_dir):
+        for file in files:
+            if file == '.cproject':
+                project_file = os.path.join(root, file)
+                try:
+                    # 解析XML文件
+                    tree = ET.parse(project_file)
+                    root_element = tree.getroot()
+                    
+                    # 查找预处理宏定义
+                    # 在.cproject文件中，宏定义通常在以下位置：
+                    # <storageModule><cconfiguration><storageModule configurationId="cdtBuildSystem"><configuration><folderInfo><toolChain><tool><option superClass="gnu.c.compiler.option.preprocessor.def.symbols">
+                    for option in root_element.iter('option'):
+                        if option.get('superClass') == 'gnu.c.compiler.option.preprocessor.def.symbols':
+                            for listOptionValue in option.findall('listOptionValue'):
+                                macro_value = listOptionValue.get('value')
+                                if macro_value:
+                                    # 移除引号
+                                    macro_value = macro_value.strip('"')
+                                    
+                                    # 分离宏名和值（如果有的话）
+                                    if '=' in macro_value:
+                                        macro_name, macro_val = macro_value.split('=', 1)
+                                        macros[macro_name.strip()] = macro_val.strip()
+                                    else:
+                                        # 没有指定值的宏定义，默认为1
+                                        macros[macro_value] = "1"
+
+                except Exception as e:
+                    # 忽略解析错误
+                    pass
+    
+    return macros
+
 def build_text_tree(call_graph, tree_name="Global"):
     """根据函数调用关系生成文本树"""
     # 创建所有节点
@@ -900,6 +973,9 @@ if __name__ == "__main__":
             unique_project_include_paths.append(path)
     project_include_paths = unique_project_include_paths
     
+    # 从项目文件中提取预处理宏定义
+    project_macros = extract_preprocessor_macros_from_project(project_dir)
+    
     c_files = get_c_files(project_dir)
 
     full_call_graph = {}
@@ -925,6 +1001,10 @@ if __name__ == "__main__":
         # 直接使用从项目配置中读取的路径
         for include_path in project_include_paths:
             parse_args.append("-I" + include_path)
+        
+        # 添加从项目文件中提取的预处理宏定义
+        for macro_name, macro_value in project_macros.items():
+            parse_args.append("-D" + macro_name + "=" + macro_value)
         
         graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, args=parse_args)
         if not graph:
