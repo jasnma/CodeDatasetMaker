@@ -10,7 +10,7 @@
 // 条件编译宏定义
 #define CPU_BIG_ENDIAN 1
 #define CPU_LITTLE_ENDIAN 0
-#define CONFIG_BYTE_ORDER CPU_LITTLE_ENDIAN
+#define CONFIG_BYTE_ORDER CPU_BIG_ENDIAN
 
 // 带参数的宏
 #define SQUARE(x) ((x) * (x))

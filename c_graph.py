@@ -39,10 +39,9 @@ def parse_file(file_path, args=None):
     tu = index.parse(
         file_path, 
         args=args,
-        options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
-               clang.cindex.TranslationUnit.PARSE_INCOMPLETE |
-               clang.cindex.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
-               clang.cindex.TranslationUnit.PARSE_CACHE_COMPLETION_RESULTS
+        options= clang.cindex.TranslationUnit.PARSE_INCOMPLETE |
+                clang.cindex.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
+                clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
     )
     call_graph = {}
     
@@ -230,22 +229,64 @@ def parse_file(file_path, args=None):
             macro_name = node.spelling
             # 获取宏定义的内容
             macro_content = ""
+            macro_definition_path = relative_path  # 默认使用当前文件路径
+            
             try:
                 # 尝试获取宏定义的原始文本
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                    # 获取宏定义所在的行
-                    line_num = node.location.line - 1  # 行号从1开始，索引从0开始
-                    if line_num < len(lines):
-                        macro_content = lines[line_num].strip()
+                if node.location.file:
+                    macro_file_path = os.path.abspath(node.location.file.name)
+                    try:
+                        macro_relative_path = os.path.relpath(macro_file_path, project_root)
+                    except ValueError:
+                        macro_relative_path = macro_file_path
+                    
+                    # 只有当文件在项目目录内时才读取内容
+                    if macro_file_path.startswith(os.path.abspath(project_root)):
+                        with open(macro_file_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            # 获取宏定义所在的行
+                            line_num = node.location.line - 1  # 行号从1开始，索引从0开始
+                            if line_num < len(lines):
+                                macro_content = lines[line_num].strip()
+                                
+                        # 更新宏定义的位置信息
+                        macro_definition_path = macro_relative_path
+                    else:
+                        # 如果文件不在项目目录内，使用当前文件路径
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            # 获取宏定义所在的行
+                            line_num = node.location.line - 1  # 行号从1开始，索引从0开始
+                            if line_num < len(lines):
+                                macro_content = lines[line_num].strip()
+                        macro_definition_path = relative_path
+                else:
+                    # 如果没有文件信息，使用当前文件路径
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        # 获取宏定义所在的行
+                        line_num = node.location.line - 1  # 行号从1开始，索引从0开始
+                        if line_num < len(lines):
+                            macro_content = lines[line_num].strip()
+                    macro_definition_path = relative_path
             except:
+                # 如果出现异常，使用当前文件路径
+                macro_definition_path = relative_path
                 pass
             
-            if macro_name and macro_name not in file_info["macros"]:
-                file_info["macros"].append(macro_name)
-            
-            # 记录宏定义信息
-            macro_defs[macro_name] = (macro_content, relative_path)
+            # 对于已经存在的宏定义，优先保留头文件中的定义
+            if macro_name in macro_defs:
+                # 如果当前宏定义在头文件中，优先使用
+                existing_path = macro_defs[macro_name][1]
+                # 如果当前路径是头文件，或者现有路径不是头文件，则更新
+                if macro_definition_path.startswith("include/") or not existing_path.startswith("include/"):
+                    macro_defs[macro_name] = (macro_content, macro_definition_path)
+            else:
+                if macro_name and macro_name not in file_info["macros"]:
+                    file_info["macros"].append(macro_name)
+                
+                # 记录宏定义信息
+                macro_defs[macro_name] = (macro_content, macro_definition_path)
         # 包含文件
         elif node.kind == clang.cindex.CursorKind.INCLUSION_DIRECTIVE:
             include_name = node.spelling
