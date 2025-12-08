@@ -968,18 +968,28 @@ def save_text_tree(call_graph, output_dir, project_name):
     
     project_output_dir = os.path.join(output_dir, project_name)
     os.makedirs(project_output_dir, exist_ok=True)
-    file_name = os.path.join(project_output_dir, "global_project_text_tree.txt")
+    file_name = os.path.join(project_output_dir, "call_text_tree.txt")
     with open(file_name, "w") as f:
         f.write(text_tree_content)
     print(f"Text tree saved to {file_name}")
 
 def save_file_info_json(file_infos, output_dir, project_name):
     """保存文件信息为JSON"""
+    # 简化文件信息，只保留functions和includes字段
+    simplified_file_infos = []
+    for file_info in file_infos:
+        simplified_info = {
+            "file": file_info["file"],
+            "functions": file_info["functions"],
+            "includes": file_info["includes"]
+        }
+        simplified_file_infos.append(simplified_info)
+    
     project_output_dir = os.path.join(output_dir, project_name)
     os.makedirs(project_output_dir, exist_ok=True)
     file_name = os.path.join(project_output_dir, "file_info.json")
     with open(file_name, "w") as f:
-        json.dump(file_infos, f, indent=2)
+        json.dump(simplified_file_infos, f, indent=2)
     print(f"File info saved to {file_name}")
 
 def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
