@@ -1,0 +1,961 @@
+#!/usr/bin/env python3
+
+import argparse
+import os
+import json
+import re
+import clang.cindex
+from anytree import Node, RenderTree
+import xml.etree.ElementTree as ET
+from collections import defaultdict
+
+# 确保 libclang 已正确配置
+try:
+    # 尝试设置 libclang 路径（根据不同系统可能需要调整）
+    if os.name == 'nt':  # Windows
+        clang.cindex.Config.set_library_file('C:/Program Files/LLVM/bin/libclang.dll')
+    elif os.uname().sysname == 'Darwin':  # macOS
+        clang.cindex.Config.set_library_file('/usr/local/opt/llvm/lib/libclang.dylib')
+    else:  # Linux
+        clang.cindex.Config.set_library_file('/usr/lib/llvm-14/lib/libclang.so')
+except:
+    pass  # 如果设置失败，使用系统默认路径
+
+def get_c_files(directory):
+    """获取目录下所有C源文件"""
+    c_files = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.c') or file.endswith('.cpp') or file.endswith('.cc'):
+                c_files.append(os.path.join(root, file))
+    return c_files
+
+def parse_file(file_path, args=None):
+    index = clang.cindex.Index.create()
+    if args is None:
+        args = []
+    # 使用更全面的解析选项以确保能正确识别所有结构体定义，包括在头文件中定义的结构体
+    tu = index.parse(
+        file_path, 
+        args=args,
+        options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
+               clang.cindex.TranslationUnit.PARSE_INCOMPLETE |
+               clang.cindex.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
+               clang.cindex.TranslationUnit.PARSE_CACHE_COMPLETION_RESULTS |
+               clang.cindex.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES
+    )
+    call_graph = {}
+    
+    # 存储文件的信息
+    file_info = {
+        "file": os.path.basename(file_path),
+        "functions": [],
+        "structs": [],
+        "macros": [],
+        "includes": []
+    }
+    
+    # 标准化文件路径，移除工作目录前缀（如果存在）
+    normalized_path = os.path.abspath(file_path)
+    project_root = os.path.abspath(args[0]) if args and len(args) > 0 and not args[0].startswith('-') else os.path.dirname(normalized_path)
+    try:
+        relative_path = os.path.relpath(normalized_path, project_root)
+    except ValueError:
+        # 处理跨驱动器的情况（Windows）
+        relative_path = normalized_path
+
+    # 存储结构体字段信息
+    struct_fields = {}
+    
+    # 存储结构体使用信息
+    struct_uses = defaultdict(list)  # 结构体名 -> [(文件路径:函数名), ...]
+    
+    # 存储全局变量定义和使用信息
+    global_var_defs = {}  # 变量名 -> (类型, 文件路径)
+    global_var_uses = defaultdict(list)  # 变量名 -> [(文件路径:函数名), ...]
+    
+    # 存储宏定义和使用信息
+    macro_defs = {}  # 宏名 -> (内容, 文件路径)
+    macro_uses = defaultdict(list)  # 宏名 -> [(文件路径:函数名/上下文), ...]
+    
+    def visit_node(node, current_func=None):
+        # 处理所有节点，包括来自头文件的节点
+        # 但要避免无限递归，只处理项目内的文件
+        if node.location.file:
+            node_file_path = os.path.abspath(node.location.file.name)
+            # 检查是否在项目目录内
+            if not node_file_path.startswith(os.path.abspath(project_root)):
+                # 不在项目目录内的文件（如系统头文件）不需要处理
+                return
+            
+        # 如果节点不属于任何文件（如根节点），也进行处理
+            
+        # 函数定义
+        if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            func_name = node.spelling
+            # 添加到函数列表
+            if func_name and func_name not in file_info["functions"]:
+                file_info["functions"].append(func_name)
+            # 使用文件路径作为前缀来区分同名函数
+            if func_name:
+                unique_func_name = f"{relative_path}:{func_name}"
+                call_graph.setdefault(unique_func_name, [])
+                current_func = unique_func_name
+                
+                # 检查函数参数中的结构体类型
+                for child in node.get_children():
+                    if child.kind == clang.cindex.CursorKind.PARM_DECL:
+                        param_type = child.type.spelling
+                        # 检查是否是结构体类型
+                        if param_type.startswith("struct "):
+                            struct_name = param_type[7:]  # 去掉"struct "前缀
+                            if struct_name:
+                                use_location = f"{relative_path}:{func_name}"
+                                if use_location not in struct_uses[struct_name]:
+                                    struct_uses[struct_name].append(use_location)
+                        # 也检查不带"struct "前缀的情况
+                        else:
+                            # 检查是否与已知结构体匹配
+                            for s_name in struct_fields.keys():
+                                if s_name == param_type:
+                                    use_location = f"{relative_path}:{func_name}"
+                                    if use_location not in struct_uses[s_name]:
+                                        struct_uses[s_name].append(use_location)
+        # 函数调用
+        elif node.kind == clang.cindex.CursorKind.CALL_EXPR and current_func:
+            called_func_name = node.spelling
+            # 对于调用，我们暂时只记录函数名，后续在合并时处理
+            if called_func_name:
+                call_graph[current_func].append(called_func_name)
+        # 结构体定义
+        elif node.kind == clang.cindex.CursorKind.STRUCT_DECL:
+            struct_name = node.spelling
+            
+            # 对于匿名结构体或Clang无法正确识别名称的结构体，尝试多种方法获取正确名称
+            if not struct_name or struct_name.startswith("struct (unnamed at"):
+                # 方法1: 检查语义父节点是否是typedef声明
+                semantic_parent = node.semantic_parent
+                if semantic_parent and semantic_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                    struct_name = semantic_parent.spelling
+                # 方法2: 检查直接父节点是否是typedef声明
+                elif hasattr(node, 'lexical_parent'):
+                    lexical_parent = node.lexical_parent
+                    if lexical_parent and lexical_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                        struct_name = lexical_parent.spelling
+                # 方法3: 在整个AST中查找是否有typedef声明引用了这个结构体
+                if not struct_name or struct_name.startswith("struct (unnamed at"):
+                    # 遍历整个AST查找引用这个结构体的typedef声明
+                    def find_typedef_for_struct(root_node, target_struct_node):
+                        if root_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                            # 检查typedef的子节点是否是我们正在处理的结构体
+                            for child in root_node.get_children():
+                                if child.kind == clang.cindex.CursorKind.STRUCT_DECL and child == target_struct_node:
+                                    return root_node.spelling
+                        # 递归检查子节点
+                        for child in root_node.get_children():
+                            result = find_typedef_for_struct(child, target_struct_node)
+                            if result:
+                                return result
+                        return None
+                    
+                    typedef_name = find_typedef_for_struct(tu.cursor, node)
+                    if typedef_name:
+                        struct_name = typedef_name
+                # 方法4: 通过解析源代码获取typedef名称
+                if not struct_name or struct_name.startswith("struct (unnamed at"):
+                    typedef_name = extract_typedef_name_from_source(file_path, node.location.line)
+                    if typedef_name:
+                        struct_name = typedef_name
+                    else:
+                        # 如果无法通过解析获取，尝试使用displayname作为备选方案
+                        struct_name = node.displayname if node.displayname else "unnamed_struct"
+            
+            # 最后的备选方案
+            if not struct_name:
+                struct_name = "unnamed_struct"
+            
+            if struct_name and struct_name not in file_info["structs"]:
+                file_info["structs"].append(struct_name)
+                
+            # 收集结构体字段信息
+            fields = []
+            for child in node.get_children():
+                if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+                    field_name = child.spelling
+                    field_type = child.type.spelling
+                    fields.append({"name": field_name, "type": field_type})
+            
+            if struct_name and fields:
+                # 获取结构体定义的实际位置
+                definition_location = relative_path
+                if node.location.file:
+                    node_file_path = os.path.abspath(node.location.file.name)
+                    try:
+                        definition_location = os.path.relpath(node_file_path, project_root)
+                    except ValueError:
+                        definition_location = node_file_path
+                        
+                struct_fields[struct_name] = {
+                    "struct": struct_name,
+                    "fields": fields,
+                    "defined_in": definition_location
+                }
+        # 宏定义
+        elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
+            macro_name = node.spelling
+            # 获取宏定义的内容
+            macro_content = ""
+            try:
+                # 尝试获取宏定义的原始文本
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+                    # 获取宏定义所在的行
+                    line_num = node.location.line - 1  # 行号从1开始，索引从0开始
+                    if line_num < len(lines):
+                        macro_content = lines[line_num].strip()
+            except:
+                pass
+            
+            if macro_name and macro_name not in file_info["macros"]:
+                file_info["macros"].append(macro_name)
+            
+            # 记录宏定义信息
+            macro_defs[macro_name] = (macro_content, relative_path)
+        # 包含文件
+        elif node.kind == clang.cindex.CursorKind.INCLUSION_DIRECTIVE:
+            include_name = node.spelling
+            if include_name and include_name not in file_info["includes"]:
+                file_info["includes"].append(include_name)
+        # 全局变量声明
+        elif node.kind == clang.cindex.CursorKind.VAR_DECL and not current_func:
+            var_name = node.spelling
+            var_type = node.type.spelling
+            if var_name:
+                global_var_defs[var_name] = (var_type, relative_path)
+        # 变量引用（在函数内部）
+        elif node.kind == clang.cindex.CursorKind.DECL_REF_EXPR and current_func:
+            # 检查是否引用了全局变量或结构体
+            try:
+                referenced_decl = node.referenced
+                if referenced_decl:
+                    # 检查是否引用了全局变量
+                    if referenced_decl.kind == clang.cindex.CursorKind.VAR_DECL:
+                        var_name = referenced_decl.spelling
+                        if var_name in global_var_defs:
+                            # 记录全局变量的使用
+                            use_location = f"{relative_path}:{current_func.split(':')[-1]}"
+                            if use_location not in global_var_uses[var_name]:
+                                global_var_uses[var_name].append(use_location)
+                    # 检查是否引用了结构体
+                    elif referenced_decl.kind == clang.cindex.CursorKind.STRUCT_DECL:
+                        struct_name = referenced_decl.spelling
+                        if struct_name:
+                            # 记录结构体的使用
+                            use_location = f"{relative_path}:{current_func.split(':')[-1]}"
+                            if use_location not in struct_uses[struct_name]:
+                                struct_uses[struct_name].append(use_location)
+            except AttributeError:
+                # 如果无法获取引用信息，则跳过
+                pass
+        
+        # 检查变量声明中的结构体类型使用
+        elif node.kind == clang.cindex.CursorKind.VAR_DECL:
+            # 检查变量声明中的类型
+            var_type = node.type.spelling
+            # 检查是否是结构体类型
+            if var_type.startswith("struct "):
+                struct_name = var_type[7:]  # 去掉"struct "前缀
+                if struct_name:
+                    context = current_func.split(':')[-1] if current_func else "global"
+                    use_location = f"{relative_path}:{context}"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
+            # 也检查不带"struct "前缀的情况
+            else:
+                # 检查是否与已知结构体匹配
+                for struct_name in struct_fields.keys():
+                    if struct_name == var_type:
+                        context = current_func.split(':')[-1] if current_func else "global"
+                        use_location = f"{relative_path}:{context}"
+                        if use_location not in struct_uses[struct_name]:
+                            struct_uses[struct_name].append(use_location)
+                            
+            # 检查返回类型是否是结构体
+            result_type = node.result_type.spelling
+            if result_type.startswith("struct "):
+                struct_name = result_type[7:]  # 去掉"struct "前缀
+                if struct_name:
+                    context = current_func.split(':')[-1] if current_func else "global"
+                    use_location = f"{relative_path}:{context}"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
+            else:
+                # 检查返回类型是否与已知结构体匹配
+                for struct_name in struct_fields.keys():
+                    if struct_name == result_type:
+                        context = current_func.split(':')[-1] if current_func else "global"
+                        use_location = f"{relative_path}:{context}"
+                        if use_location not in struct_uses[struct_name]:
+                            struct_uses[struct_name].append(use_location)
+                            
+        # 检查函数参数中的结构体类型使用
+        elif node.kind == clang.cindex.CursorKind.PARM_DECL:
+            param_type = node.type.spelling
+            # 检查是否是结构体类型
+            if param_type.startswith("struct "):
+                struct_name = param_type[7:]  # 去掉"struct "前缀
+                if struct_name:
+                    # 获取参数所属的函数
+                    parent = node.semantic_parent
+                    if parent and parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+                        func_name = parent.spelling
+                        if func_name:
+                            use_location = f"{relative_path}:{func_name}"
+                            if use_location not in struct_uses[struct_name]:
+                                struct_uses[struct_name].append(use_location)
+            # 也检查不带"struct "前缀的情况
+            else:
+                # 检查是否与已知结构体匹配
+                for struct_name in struct_fields.keys():
+                    if struct_name == param_type:
+                        # 获取参数所属的函数
+                        parent = node.semantic_parent
+                        if parent and parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+                            func_name = parent.spelling
+                            if func_name:
+                                use_location = f"{relative_path}:{func_name}"
+                                if use_location not in struct_uses[struct_name]:
+                                    struct_uses[struct_name].append(use_location)
+                            
+        # 检查函数返回类型中的结构体类型使用
+        elif node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+            return_type = node.result_type.spelling
+            # 检查返回类型是否是结构体类型
+            if return_type.startswith("struct "):
+                struct_name = return_type[7:]  # 去掉"struct "前缀
+                if struct_name:
+                    func_name = node.spelling
+                    if func_name:
+                        use_location = f"{relative_path}:{func_name}"
+                        if use_location not in struct_uses[struct_name]:
+                            struct_uses[struct_name].append(use_location)
+            # 也检查不带"struct "前缀的情况
+            else:
+                # 检查返回类型是否与已知结构体匹配
+                for struct_name in struct_fields.keys():
+                    if struct_name == return_type:
+                        func_name = node.spelling
+                        if func_name:
+                            use_location = f"{relative_path}:{func_name}"
+                            if use_location not in struct_uses[struct_name]:
+                                struct_uses[struct_name].append(use_location)
+                            
+            # 继续遍历子节点以处理函数内部的使用情况
+            for c in node.get_children():
+                visit_node(c, node.spelling)
+        # 检查是否是宏使用（通过标识符引用）
+        elif node.kind == clang.cindex.CursorKind.MACRO_INSTANTIATION:
+            macro_name = node.spelling
+            # 记录宏的使用位置
+            context = current_func.split(':')[-1] if current_func else "global"
+            use_location = f"{relative_path}:{context}"
+            if use_location not in macro_uses[macro_name]:
+                macro_uses[macro_name].append(use_location)
+        
+        # 遍历子节点
+        for c in node.get_children():
+            visit_node(c, current_func)
+
+    visit_node(tu.cursor)
+    
+    # 通过正则表达式额外提取宏使用情况，补充Clang可能遗漏的部分
+    # extract_macro_uses_from_source(file_path, macro_uses, relative_path)
+
+    # 通过正则表达式额外提取宏定义，补充Clang可能遗漏的部分
+    # extract_macros_from_source(file_path, file_info)
+    
+    # 收集包含目录用于检查头文件
+    include_dirs = [os.path.dirname(file_path)]  # 添加当前文件所在目录
+    if args:
+        for arg in args:
+            if arg.startswith("-I"):
+                include_dirs.append(arg[2:])  # 移除"-I"前缀
+    
+    # 通过正则表达式额外提取包含文件，补充Clang可能遗漏的部分
+    # extract_includes_from_source(file_path, file_info, include_dirs)
+    
+    return call_graph, relative_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses
+
+def extract_macros_from_source(file_path, file_info):
+    """通过正则表达式从源代码中提取宏定义"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        import re
+        # 匹配#define宏定义
+        macro_pattern = r'^\s*#\s*define\s+(\w+)'
+        for match in re.finditer(macro_pattern, content, re.MULTILINE):
+            macro_name = match.group(1)
+            if macro_name and macro_name not in file_info["macros"]:
+                file_info["macros"].append(macro_name)
+    except Exception as e:
+        pass  # 忽略文件读取错误
+
+def extract_macro_uses_from_source(file_path, macro_uses, relative_path):
+    """通过正则表达式从源代码中提取宏使用情况"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        import re
+        # 匹配标识符（可能是宏）
+        identifier_pattern = r'\b([A-Z_][A-Z0-9_]*)\b'
+        for match in re.finditer(identifier_pattern, content):
+            macro_name = match.group(1)
+            # 简单地将文件路径作为使用位置记录
+            use_location = f"{relative_path}:global"
+            if use_location not in macro_uses[macro_name]:
+                macro_uses[macro_name].append(use_location)
+    except Exception as e:
+        pass  # 忽略文件读取错误
+
+def extract_includes_from_source(file_path, file_info, include_dirs=[]):
+    """通过正则表达式从源代码中提取包含文件"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+            
+        import re
+        # 匹配#include指令，捕获整个指令行以区分<>和""
+        include_pattern = r'^\s*#\s*include\s+([<"])([^>"]+)([>"])'
+        for match in re.finditer(include_pattern, content, re.MULTILINE):
+            quote_start = match.group(1)
+            include_name = match.group(2)
+            quote_end = match.group(3)
+            
+            if include_name and include_name not in file_info["includes"]:
+                file_info["includes"].append(include_name)
+                
+                # 检查头文件是否存在
+                found = False
+                
+                # 对于双引号包围的头文件，先检查相对路径
+                if quote_start == '"' and quote_end == '"':
+                    include_file = os.path.join(os.path.dirname(file_path), include_name)
+                    if os.path.exists(include_file):
+                        found = True
+                    
+                    # 如果没找到，检查包含目录
+                    if not found:
+                        for include_dir in include_dirs:
+                            include_file = os.path.join(include_dir, include_name)
+                            if os.path.exists(include_file):
+                                found = True
+                                break
+                
+                # 对于尖括号包围的系统头文件，只在系统目录和指定包含目录中查找
+                elif quote_start == '<' and quote_end == '>':
+                    # 系统包含目录
+                    system_include_dirs = [
+                        "/usr/include",
+                        "/usr/local/include"
+                    ]
+                    
+                    # 检查系统目录和指定包含目录
+                    for include_dir in system_include_dirs + include_dirs:
+                        include_file = os.path.join(include_dir, include_name)
+                        if os.path.exists(include_file):
+                            found = True
+                            break
+                
+                # 如果仍然没找到，输出警告日志
+                # 但对于某些常见的系统头文件，我们不输出警告
+                common_system_headers = [
+                    "stdio.h", "stdlib.h", "string.h", "stdint.h", "stdbool.h",
+                    "stddef.h", "limits.h", "math.h", "time.h", "unistd.h",
+                    "assert.h", "stdarg.h", "ctype.h", "errno.h", "float.h",
+                    "locale.h", "setjmp.h", "signal.h", "tgmath.h"
+                ]
+                
+                if not found and include_name not in common_system_headers:
+                    print(f"Warning: Header file '{include_name}' not found (included in '{file_path}')")
+    except Exception as e:
+        pass  # 忽略文件读取错误
+
+def extract_typedef_name_from_source(file_path, line_number):
+    """从源代码中提取typedef名称"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # 从指定行向上搜索typedef关键字
+        for i in range(line_number - 1, -1, -1):
+            line = lines[i].strip()
+            # 匹配typedef struct {...} name; 或 typedef struct name {...} name;
+            # 改进的正则表达式，能够处理预处理指令
+            typedef_match = re.search(r'typedef\s+struct(?:\s+\w+)?\s*\{[^}]*\}\s*(\w+)(?:\s*,\s*\*\w+)?\s*;', line, re.DOTALL)
+            if typedef_match:
+                return typedef_match.group(1)
+            
+            # 匹配多行的typedef struct
+            if 'typedef' in line and 'struct' in line:
+                # 向下搜索直到找到分号
+                typedef_lines = [line]
+                brace_count = line.count('{') - line.count('}')
+                for j in range(i + 1, len(lines)):
+                    current_line = lines[j].strip()
+                    # 跳过预处理指令行
+                    if not current_line.startswith('#'):
+                        typedef_lines.append(current_line)
+                        brace_count += current_line.count('{') - current_line.count('}')
+                        if brace_count == 0 and ';' in current_line:
+                            typedef_text = ' '.join(typedef_lines)
+                            # 更宽松的正则表达式匹配，支持逗号分隔的多个标识符
+                            typedef_match = re.search(r'typedef\s+struct(?:\s+\w+)?\s*\{[^}]*\}\s*(\w+)(?:\s*,\s*\*\w+)?\s*;', typedef_text, re.DOTALL)
+                            if typedef_match:
+                                return typedef_match.group(1)
+                            break
+                        elif brace_count < 0:
+                            # 括号不匹配，跳出循环
+                            break
+    except Exception as e:
+        pass
+    return None
+
+def extract_include_paths_from_project(project_dir):
+    """从项目文件中提取包含路径"""
+    include_paths = []
+    
+    # 查找Keil项目文件
+    for root, dirs, files in os.walk(project_dir):
+        for file in files:
+            if file.endswith(('.uvproj', '.uvprojx')):
+                project_file = os.path.join(root, file)
+                try:
+                    # 解析XML文件
+                    tree = ET.parse(project_file)
+                    root_element = tree.getroot()
+                    
+                    # 查找包含路径
+                    # 在Keil项目文件中，包含路径通常在以下位置：
+                    # <Project><Targets><Target><TargetName><Toolset><Cads><IncludePath>
+                    for include_path in root_element.iter('IncludePath'):
+                        path_text = include_path.text
+                        if path_text:
+                            # 分割多个路径（通常用分号分隔）
+                            paths = path_text.split(';')
+                            for path in paths:
+                                path = path.strip()
+                                if path and path not in include_paths:
+                                    # 将相对路径转换为绝对路径
+                                    if not os.path.isabs(path):
+                                        path = os.path.join(os.path.dirname(project_file), path)
+                                    include_paths.append(path)
+                except Exception as e:
+                    # 忽略解析错误
+                    pass
+    
+    # 查找Eclipse CDT项目文件(.cproject)
+    abs_project_dir = os.path.abspath(project_dir)
+    for root, dirs, files in os.walk(abs_project_dir):
+        for file in files:
+            if file == '.cproject':
+                project_file = os.path.join(root, file)
+                try:
+                    # 解析XML文件
+                    tree = ET.parse(project_file)
+                    root_element = tree.getroot()
+                    
+                    # 查找包含路径
+                    # 在.cproject文件中，包含路径通常在以下位置：
+                    # <storageModule><cconfiguration><storageModule configurationId="cdtBuildSystem"><configuration><folderInfo><toolChain><tool><option superClass="gnu.c.compiler.option.include.paths">
+                    for option in root_element.iter('option'):
+                        if option.get('superClass') == 'gnu.c.compiler.option.include.paths':
+                            for listOptionValue in option.findall('listOptionValue'):
+                                path_value = listOptionValue.get('value')
+
+                                if path_value:
+                                    # 移除引号
+                                    path_value = path_value.strip('"')
+
+                                    # 处理工作空间变量
+                                    original_path_value = path_value
+                                    if '${workspace_loc:' in path_value:
+                                        # 替换工作空间变量
+                                        workspace_loc = os.path.dirname(abs_project_dir)
+                                        path_value = path_value.replace('${workspace_loc:', workspace_loc)
+                                        path_value = path_value.rstrip('}')
+
+                                        # 处理项目名称变量
+                                        if '${ProjName}' in path_value:
+                                            # 提取项目名称（从项目目录）
+                                            project_name = os.path.basename(abs_project_dir)
+                                            path_value = path_value.replace('${ProjName}', project_name)
+
+                                    path_value = os.path.normpath(path_value)
+                                    include_paths.append(path_value)
+
+                except Exception as e:
+                    # 忽略解析错误
+                    pass
+    
+    return include_paths
+
+def build_text_tree(call_graph, tree_name="Global"):
+    """根据函数调用关系生成文本树"""
+    # 创建所有节点
+    nodes = {f: Node(f) for f in call_graph}
+    
+    # 处理调用关系
+    for parent, children in call_graph.items():
+        for child in children:
+            if child in nodes:
+                # 直接连接，因为child已经是完整的键
+                nodes[child].parent = nodes[parent]
+            else:
+                # 如果child不在nodes中，可能是未定义的函数或格式问题
+                # 检查是否是函数名（不包含路径）
+                if ':' not in child:
+                    # 尝试查找匹配的函数名
+                    child_found = False
+                    for node_key in nodes:
+                        if ':' in node_key:
+                            node_func_name = node_key.split(':', 1)[1]
+                            if node_func_name == child:
+                                nodes[node_key].parent = nodes[parent]
+                                child_found = True
+                                break
+                    if not child_found:
+                        new_child_key = f"unknown:{child}"
+                        if new_child_key not in nodes:
+                            nodes[new_child_key] = Node(new_child_key)
+                        nodes[new_child_key].parent = nodes[parent]
+                else:
+                    # child包含路径但不在nodes中
+                    new_child_key = child
+                    if new_child_key not in nodes:
+                        nodes[new_child_key] = Node(new_child_key)
+                    nodes[new_child_key].parent = nodes[parent]
+    
+    # 找根节点：没有父节点的节点
+    roots = [key for key, node in nodes.items() if node.parent is None]
+
+    print(f"\nText Tree: {tree_name}")
+    for root in roots:
+        if root in nodes:
+            for pre, _, node in RenderTree(nodes[root]):
+                print(pre + node.name)
+
+def resolve_call_graph(full_call_graph):
+    """解析调用图，将函数调用映射到正确的文件路径"""
+    # 创建函数名到完整路径的映射
+    func_to_paths = {}
+    for full_key in full_call_graph:
+        if ':' in full_key:
+            path, func_name = full_key.split(':', 1)
+            if func_name not in func_to_paths:
+                func_to_paths[func_name] = []
+            func_to_paths[func_name].append(full_key)
+    
+    # 解析调用关系
+    resolved_graph = {}
+    for caller_key, callees in full_call_graph.items():
+        resolved_graph[caller_key] = []
+        caller_file = caller_key.split(':', 1)[0] if ':' in caller_key else ""
+        
+        for callee_name in callees:
+            if callee_name in func_to_paths:
+                # 优先选择同一个文件中的函数
+                same_file_func = None
+                other_funcs = []
+                
+                for func_path in func_to_paths[callee_name]:
+                    func_file = func_path.split(':', 1)[0]
+                    if func_file == caller_file:
+                        same_file_func = func_path
+                    else:
+                        other_funcs.append(func_path)
+                
+                if same_file_func:
+                    resolved_graph[caller_key].append(same_file_func)
+                elif other_funcs:
+                    # 如果同一个文件中没有，选择第一个其他文件中的函数
+                    resolved_graph[caller_key].append(other_funcs[0])
+            else:
+                # 未知函数，保持原样
+                resolved_graph[caller_key].append(f"unknown:{callee_name}")
+    
+    return resolved_graph
+
+def save_json(call_graph, output_dir, project_name):
+    """保存调用图为JSON"""
+    resolved_graph = resolve_call_graph(call_graph)
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "call_graph.json")
+    with open(file_name, "w") as f:
+        json.dump(resolved_graph, f, indent=2)
+    print(f"Global call graph saved to {file_name}")
+
+def would_create_cycle(parent_node, child_node):
+    """检查设置parent是否会导致循环引用"""
+    # 如果父节点是子节点的后代，则会形成循环
+    current = parent_node
+    while current.parent is not None:
+        if current.parent == child_node:
+            return True
+        current = current.parent
+    return False
+
+def save_text_tree(call_graph, output_dir, project_name):
+    """根据函数调用关系生成全局文本树并保存到文件"""
+    # 创建所有节点
+    nodes = {f: Node(f) for f in call_graph}
+    
+    # 创建一个集合来跟踪已经处理过的父子关系，避免循环引用
+    processed_relations = set()
+    
+    # 处理调用关系
+    for parent, children in call_graph.items():
+        for child in children:
+            # 创建一个元组表示父子关系
+            relation = (parent, child)
+            # 如果这个关系已经被处理过，跳过以避免循环
+            if relation in processed_relations:
+                continue
+            
+            if child in nodes:
+                # 检查是否会形成循环引用
+                if not would_create_cycle(nodes[parent], nodes[child]):
+                    # 直接连接，因为child已经是完整的键
+                    nodes[child].parent = nodes[parent]
+                    processed_relations.add(relation)
+            else:
+                # 如果child不在nodes中，可能是未定义的函数或格式问题
+                # 检查是否是函数名（不包含路径）
+                if ':' not in child:
+                    # 尝试查找匹配的函数名
+                    child_found = False
+                    for node_key in nodes:
+                        if ':' in node_key:
+                            node_func_name = node_key.split(':', 1)[1]
+                            if node_func_name == child:
+                                # 检查是否会形成循环引用
+                                if not would_create_cycle(nodes[parent], nodes[node_key]):
+                                    nodes[node_key].parent = nodes[parent]
+                                    processed_relations.add((parent, node_key))
+                                child_found = True
+                                break
+                    if not child_found:
+                        new_child_key = f"unknown:{child}"
+                        if new_child_key not in nodes:
+                            nodes[new_child_key] = Node(new_child_key)
+                        # 检查是否会形成循环引用
+                        if not would_create_cycle(nodes[parent], nodes[new_child_key]):
+                            nodes[new_child_key].parent = nodes[parent]
+                            processed_relations.add((parent, new_child_key))
+                else:
+                    # child包含路径但不在nodes中
+                    new_child_key = child
+                    if new_child_key not in nodes:
+                        nodes[new_child_key] = Node(new_child_key)
+                    # 检查是否会形成循环引用
+                    if not would_create_cycle(nodes[parent], nodes[new_child_key]):
+                        nodes[new_child_key].parent = nodes[parent]
+                        processed_relations.add((parent, new_child_key))
+    
+    # 找根节点：没有父节点的节点
+    roots = [key for key, node in nodes.items() if node.parent is None]
+
+    # 保存到文件
+    text_tree_content = "Text Tree: Global Project\n"
+    for root in roots:
+        if root in nodes:
+            for pre, _, node in RenderTree(nodes[root]):
+                text_tree_content += pre + node.name + "\n"
+    
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "global_project_text_tree.txt")
+    with open(file_name, "w") as f:
+        f.write(text_tree_content)
+    print(f"Text tree saved to {file_name}")
+
+def save_file_info_json(file_infos, output_dir, project_name):
+    """保存文件信息为JSON"""
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "file_info.json")
+    with open(file_name, "w") as f:
+        json.dump(file_infos, f, indent=2)
+    print(f"File info saved to {file_name}")
+
+def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
+    """保存结构体信息为JSON"""
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "struct_info.json")
+    
+    # 转换结构体信息格式
+    struct_list = []
+    for struct_name, info in struct_fields.items():
+        struct_item = {
+            "struct": struct_name,
+            "fields": info["fields"],
+            "defined_in": info["defined_in"],
+            "used_by": struct_uses.get(struct_name, [])
+        }
+        struct_list.append(struct_item)
+    
+    with open(file_name, "w") as f:
+        json.dump(struct_list, f, indent=2)
+    print(f"Struct info saved to {file_name}")
+
+def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
+    """保存宏信息为JSON"""
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "macro_info.json")
+    
+    # 转换宏信息格式
+    macro_list = []
+    for macro_name, (content, defined_in) in macro_defs.items():
+        macro_item = {
+            "macro": macro_name,
+            "content": content,
+            "defined_in": defined_in,
+            "used_in": macro_uses.get(macro_name, [])
+        }
+        macro_list.append(macro_item)
+    
+    with open(file_name, "w") as f:
+        json.dump(macro_list, f, indent=2)
+    print(f"Macro info saved to {file_name}")
+
+def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, project_name):
+    project_output_dir = os.path.join(output_dir, project_name)
+    os.makedirs(project_output_dir, exist_ok=True)
+    file_name = os.path.join(project_output_dir, "global_var_info.json")
+    
+    # 转换全局变量信息格式
+    global_var_list = []
+    for var_name, (var_type, defined_in) in global_var_defs.items():
+        var_item = {
+            "var": var_name,
+            "type": var_type,
+            "defined_in": defined_in,
+            "used_in": global_var_uses.get(var_name, [])
+        }
+        global_var_list.append(var_item)
+    
+    with open(file_name, "w") as f:
+        json.dump(global_var_list, f, indent=2)
+    print(f"Global variable info saved to {file_name}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Generate function call graph for C project')
+    parser.add_argument('project_dir', help='Path to the C project directory')
+    args = parser.parse_args()
+
+    project_dir = args.project_dir
+    # 获取项目目录名
+    project_name = os.path.basename(os.path.abspath(project_dir))
+    # 创建输出目录
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 从项目文件中提取包含路径
+    project_include_paths = extract_include_paths_from_project(project_dir)
+    
+    # 去除重复的路径
+    unique_project_include_paths = []
+    for path in project_include_paths:
+        if path not in unique_project_include_paths:
+            unique_project_include_paths.append(path)
+    project_include_paths = unique_project_include_paths
+    
+    c_files = get_c_files(project_dir)
+
+    full_call_graph = {}
+    file_infos = []  # 存储所有文件的信息
+    all_struct_fields = {}  # 存储所有结构体字段信息
+    all_struct_uses = defaultdict(list)  # 存储所有结构体使用信息
+    all_global_var_defs = {}  # 存储所有全局变量定义
+    all_global_var_uses = defaultdict(list)  # 存储所有全局变量使用
+    all_macro_defs = {}  # 存储所有宏定义
+    all_macro_uses = defaultdict(list)  # 存储所有宏使用信息
+    
+    for f in c_files:
+        # 添加更多参数以启用详细的AST解析
+        parse_args = [
+            project_dir, 
+            "-I./include",
+            "-I" + os.path.join(project_dir, "include"),
+            "-I/usr/include",
+            "-I/usr/local/include"
+        ]
+        
+        # 添加从项目文件中提取的包含路径
+        # 直接使用从项目配置中读取的路径
+        for include_path in project_include_paths:
+            parse_args.append("-I" + include_path)
+        
+        graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, args=parse_args)
+        if not graph:
+            continue
+
+        # 合并到全局调用关系
+        for func, callees in graph.items():
+            full_call_graph.setdefault(func, []).extend(callees)
+        
+        # 添加文件信息
+        file_infos.append(file_info)
+        
+        # 合并结构体信息
+        all_struct_fields.update(struct_fields)
+        
+        # 合并结构体使用信息
+        for struct_name, uses in struct_uses.items():
+            for use in uses:
+                if use not in all_struct_uses[struct_name]:
+                    all_struct_uses[struct_name].append(use)
+        
+        # 合并全局变量定义
+        all_global_var_defs.update(global_var_defs)
+        
+        # 合并全局变量使用信息
+        for var_name, uses in global_var_uses.items():
+            for use in uses:
+                if use not in all_global_var_uses[var_name]:
+                    all_global_var_uses[var_name].append(use)
+        
+        # 合并宏定义信息
+        all_macro_defs.update(macro_defs)
+        
+        # 合并宏使用信息
+        for macro_name, uses in macro_uses.items():
+            for use in uses:
+                if use not in all_macro_uses[macro_name]:
+                    all_macro_uses[macro_name].append(use)
+
+    # 解析调用图用于显示和保存
+    resolved_graph = resolve_call_graph(full_call_graph)
+    
+    # 保存全局调用树（只保存全局的，不保存每个文件的）
+    save_text_tree(resolved_graph, output_dir, project_name)
+
+    # 保存调用图 JSON
+    save_json(full_call_graph, output_dir, project_name)
+    
+    # 保存文件信息 JSON
+    save_file_info_json(file_infos, output_dir, project_name)
+    
+    # 保存结构体信息 JSON
+    save_struct_info_json(all_struct_fields, all_struct_uses, output_dir, project_name)
+    
+    # 保存全局变量信息 JSON
+    save_global_var_info_json(all_global_var_defs, all_global_var_uses, output_dir, project_name)
+    
+    # 保存宏信息 JSON
+    save_macro_info_json(all_macro_defs, all_macro_uses, output_dir, project_name)

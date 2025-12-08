@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<Project>
+  <Targets>
+    <Target>
+      <TargetName>Target 1</TargetName>
+      <Toolset>
+        <Cads>
+          <IncludePath>./include;./cmsis;./device;../lib</IncludePath>
+        </Cads>
+      </Toolset>
+    </Target>
+  </Targets>
+</Project>
