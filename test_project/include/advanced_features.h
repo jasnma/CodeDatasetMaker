@@ -8,8 +8,9 @@
 #define VERSION_STRING "1.0.0"
 
 // 条件编译宏定义
-#define CONFIG_BYTE_ORDER 1
 #define CPU_BIG_ENDIAN 1
+#define CPU_LITTLE_ENDIAN 0
+#define CONFIG_BYTE_ORDER CPU_LITTLE_ENDIAN
 
 // 带参数的宏
 #define SQUARE(x) ((x) * (x))
@@ -34,6 +35,12 @@ typedef struct {
 #else
     unsigned int low;
     unsigned int high;
+#endif
+
+#if _DEBUG
+    char debug_info[256];
+#else
+    char release_info[256];
 #endif
 } j_uint64_t;
 

@@ -35,14 +35,14 @@ def parse_file(file_path, args=None):
     if args is None:
         args = []
     # 使用更全面的解析选项以确保能正确识别所有结构体定义，包括在头文件中定义的结构体
+    # 移除PARSE_SKIP_FUNCTION_BODIES标志以确保解析函数体内的调用
     tu = index.parse(
         file_path, 
         args=args,
         options=clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD |
                clang.cindex.TranslationUnit.PARSE_INCOMPLETE |
                clang.cindex.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
-               clang.cindex.TranslationUnit.PARSE_CACHE_COMPLETION_RESULTS |
-               clang.cindex.TranslationUnit.PARSE_SKIP_FUNCTION_BODIES
+               clang.cindex.TranslationUnit.PARSE_CACHE_COMPLETION_RESULTS
     )
     call_graph = {}
     
@@ -93,40 +93,65 @@ def parse_file(file_path, args=None):
         # 函数定义
         if node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
             func_name = node.spelling
-            # 添加到函数列表
-            if func_name and func_name not in file_info["functions"]:
-                file_info["functions"].append(func_name)
-            # 使用文件路径作为前缀来区分同名函数
-            if func_name:
-                unique_func_name = f"{relative_path}:{func_name}"
-                call_graph.setdefault(unique_func_name, [])
-                current_func = unique_func_name
-                
-                # 检查函数参数中的结构体类型
-                for child in node.get_children():
-                    if child.kind == clang.cindex.CursorKind.PARM_DECL:
-                        param_type = child.type.spelling
-                        # 检查是否是结构体类型
-                        if param_type.startswith("struct "):
-                            struct_name = param_type[7:]  # 去掉"struct "前缀
-                            if struct_name:
-                                use_location = f"{relative_path}:{func_name}"
-                                if use_location not in struct_uses[struct_name]:
-                                    struct_uses[struct_name].append(use_location)
-                        # 也检查不带"struct "前缀的情况
-                        else:
-                            # 检查是否与已知结构体匹配
-                            for s_name in struct_fields.keys():
-                                if s_name == param_type:
+            # 检查是否是函数定义（有函数体）而不仅仅是声明
+            is_definition = False
+            for child in node.get_children():
+                # 如果函数有复合语句子节点，则说明是定义而非声明
+                if child.kind == clang.cindex.CursorKind.COMPOUND_STMT:
+                    is_definition = True
+                    break
+            
+            # 只有函数定义才添加到函数列表和调用图中
+            if is_definition:
+                # 添加到函数列表
+                if func_name and func_name not in file_info["functions"]:
+                    file_info["functions"].append(func_name)
+                # 使用文件路径作为前缀来区分同名函数
+                if func_name:
+                    unique_func_name = f"{relative_path}:{func_name}"
+                    call_graph.setdefault(unique_func_name, [])
+                    current_func = unique_func_name
+                    
+                    # 检查函数参数中的结构体类型
+                    for child in node.get_children():
+                        if child.kind == clang.cindex.CursorKind.PARM_DECL:
+                            param_type = child.type.spelling
+                            # 检查是否是结构体类型
+                            if param_type.startswith("struct "):
+                                struct_name = param_type[7:]  # 去掉"struct "前缀
+                                if struct_name:
                                     use_location = f"{relative_path}:{func_name}"
-                                    if use_location not in struct_uses[s_name]:
-                                        struct_uses[s_name].append(use_location)
+                                    if use_location not in struct_uses[struct_name]:
+                                        struct_uses[struct_name].append(use_location)
+                            # 也检查不带"struct "前缀的情况
+                            else:
+                                # 检查是否与已知结构体匹配
+                                for s_name in struct_fields.keys():
+                                    if s_name == param_type:
+                                        use_location = f"{relative_path}:{func_name}"
+                                        if use_location not in struct_uses[s_name]:
+                                            struct_uses[s_name].append(use_location)
+                                        
+                # 继续遍历子节点以处理函数体内的调用
+                for c in node.get_children():
+                    visit_node(c, current_func)
+            else:
+                # 这是函数声明，不是定义，我们不处理它
+                pass
         # 函数调用
         elif node.kind == clang.cindex.CursorKind.CALL_EXPR and current_func:
-            called_func_name = node.spelling
-            # 对于调用，我们暂时只记录函数名，后续在合并时处理
-            if called_func_name:
-                call_graph[current_func].append(called_func_name)
+            # 获取被调用函数的名称
+            called_func_cursor = node.referenced
+            if called_func_cursor and called_func_cursor.kind == clang.cindex.CursorKind.FUNCTION_DECL:
+                called_func_name = called_func_cursor.spelling
+                # 记录调用关系
+                if called_func_name:
+                    call_graph[current_func].append(called_func_name)
+            else:
+                # 如果无法通过referenced获取，尝试使用node.spelling
+                called_func_name = node.spelling
+                if called_func_name:
+                    call_graph[current_func].append(called_func_name)
         # 结构体定义
         elif node.kind == clang.cindex.CursorKind.STRUCT_DECL:
             struct_name = node.spelling

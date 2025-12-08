@@ -1,5 +1,7 @@
 void function3() {
     // 函数3实现
+
+    function4();
 }
 
 void function4() {
