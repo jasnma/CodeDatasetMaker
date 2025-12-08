@@ -1019,16 +1019,72 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
     os.makedirs(project_output_dir, exist_ok=True)
     file_name = os.path.join(project_output_dir, "macro_info.json")
     
-    # 转换宏信息格式
+    # 定义需要排除的 Clang 内置宏前缀和特定宏名
+    clang_builtin_prefixes = [
+        '__llvm__', '__clang__', '__clang_major__', '__clang_minor__', '__clang_patchlevel__', '__clang_version__',
+        '__GNUC__', '__GNUC_MINOR__', '__GNUC_PATCHLEVEL__', '__GXX_ABI_VERSION', '__ATOMIC_', '__MEMORY_SCOPE_',
+        '__OPENCL_MEMORY_SCOPE_', '__FPCLASS_', '__PRAGMA_REDEFINE_EXTNAME', '__VERSION__', '__OBJC_BOOL_IS_BOOL',
+        '__CONSTANT_CFSTRINGS__', '__block', '__BLOCKS__', '__clang_literal_encoding__', '__clang_wide_literal_encoding__',
+        '__ORDER_', '__BYTE_ORDER__', '__LITTLE_ENDIAN__', '_LP64', '__LP64__', '__CHAR_BIT__', '__BOOL_WIDTH__',
+        '__SHRT_WIDTH__', '__INT_WIDTH__', '__LONG_WIDTH__', '__LLONG_WIDTH__', '__BITINT_MAXWIDTH__', '__SCHAR_MAX__',
+        '__SHRT_MAX__', '__INT_MAX__', '__LONG_MAX__', '__LONG_LONG_MAX__', '__WCHAR_MAX__', '__WCHAR_WIDTH__',
+        '__WINT_MAX__', '__WINT_WIDTH__', '__INTMAX_MAX__', '__INTMAX_WIDTH__', '__SIZE_MAX__', '__SIZE_WIDTH__',
+        '__UINTMAX_MAX__', '__UINTMAX_WIDTH__', '__PTRDIFF_MAX__', '__PTRDIFF_WIDTH__', '__INTPTR_MAX__', '__INTPTR_WIDTH__',
+        '__UINTPTR_MAX__', '__UINTPTR_WIDTH__', '__SIZEOF_', '__INTMAX_TYPE__', '__INTMAX_FMT', '__INTMAX_C',
+        '__UINTMAX_TYPE__', '__UINTMAX_FMT', '__UINTMAX_C', '__PTRDIFF_TYPE__', '__PTRDIFF_FMT', '__INTPTR_TYPE__',
+        '__INTPTR_FMT', '__SIZE_TYPE__', '__SIZE_FMT', '__WCHAR_TYPE__', '__WINT_TYPE__', '__SIG_ATOMIC_',
+        '__CHAR16_TYPE__', '__CHAR32_TYPE__', '__UINTPTR_TYPE__', '__UINTPTR_FMT', '__FLT16_', '__FLT_',
+        '__DBL_', '__LDBL_', '__POINTER_WIDTH__', '__BIGGEST_ALIGNMENT__', '__INT8_TYPE__', '__INT8_FMT',
+        '__INT8_C', '__INT16_TYPE__', '__INT16_FMT', '__INT16_C', '__INT32_TYPE__', '__INT32_FMT',
+        '__INT32_C', '__INT64_TYPE__', '__INT64_FMT', '__INT64_C', '__UINT8_TYPE__', '__UINT8_FMT',
+        '__UINT8_C', '__UINT8_MAX__', '__INT8_MAX__', '__UINT16_TYPE__', '__UINT16_FMT', '__UINT16_C',
+        '__UINT16_MAX__', '__INT16_MAX__', '__UINT32_TYPE__', '__UINT32_FMT', '__UINT32_C', '__UINT32_MAX__',
+        '__INT32_MAX__', '__UINT64_TYPE__', '__UINT64_FMT', '__UINT64_C', '__UINT64_MAX__', '__INT64_MAX__',
+        '__INT_LEAST', '__UINT_LEAST', '__INT_FAST', '__UINT_FAST', '__USER_LABEL_PREFIX__', '__NO_MATH_ERRNO__',
+        '__FINITE_MATH_ONLY__', '__GNUC_STDC_INLINE__', '__GCC_ATOMIC_', '__CLANG_ATOMIC_', '__GCC_DESTRUCTIVE_SIZE',
+        '__GCC_CONSTRUCTIVE_SIZE', '__NO_INLINE__', '__PIC__', '__pic__', '__FLT_RADIX__', '__DECIMAL_DIG__',
+        '__SSP__', '__nonnull', '__null_unspecified', '__nullable', 'TARGET_OS_', '__GCC_ASM_FLAG_OUTPUTS__',
+        '__code_model_small__', '__amd64', '__x86_64', '__SEG_', '__seg_', '__core2', '__tune_core2__',
+        '__REGISTER_PREFIX__', '__NO_MATH_INLINES', '__LAHF_SAHF__', '__FXSR__', '__SSE4_1__', '__SSSE3__',
+        '__SSE3__', '__SSE2__', '__SSE_MATH__', '__MMX__', '__GCC_HAVE_SYNC_COMPARE_AND_SWAP_', '__APPLE_',
+        '__weak', '__strong', '__unsafe_unretained', '__DYNAMIC__', '__MACH__', '__STDC_NO_THREADS__',
+        '__ENVIRONMENT_', '__STDC__', '__STDC_HOSTED__', '__STDC_VERSION__', '__STDC_UTF_', '__STDC_EMBED_',
+        '__GCC_HAVE_DWARF2_CFI_ASM'
+    ]
+    
+    # 特定需要排除的宏名
+    clang_builtin_names = [
+        'TARGET_IPHONE_SIMULATOR', '__SSE2_MATH__', '__SSE__'
+    ]
+    
+    # 转换宏信息格式，并过滤掉 Clang 内置宏
     macro_list = []
     for macro_name, (content, defined_in) in macro_defs.items():
-        macro_item = {
-            "macro": macro_name,
-            "content": content,
-            "defined_in": defined_in,
-            "used_in": macro_uses.get(macro_name, [])
-        }
-        macro_list.append(macro_item)
+        # 检查是否是需要排除的 Clang 内置宏
+        is_clang_builtin = False
+        
+        # 检查前缀匹配
+        for prefix in clang_builtin_prefixes:
+            if macro_name.startswith(prefix):
+                is_clang_builtin = True
+                break
+        
+        # 检查特定宏名匹配
+        if not is_clang_builtin:
+            for name in clang_builtin_names:
+                if macro_name == name:
+                    is_clang_builtin = True
+                    break
+        
+        # 如果不是 Clang 内置宏，则添加到列表中
+        if not is_clang_builtin:
+            macro_item = {
+                "macro": macro_name,
+                "content": content,
+                "defined_in": defined_in,
+                "used_in": macro_uses.get(macro_name, [])
+            }
+            macro_list.append(macro_item)
     
     with open(file_name, "w") as f:
         json.dump(macro_list, f, indent=2)
