@@ -66,6 +66,9 @@ def parse_file(file_path, args=None):
     # 存储结构体字段信息
     struct_fields = {}
     
+    # 存储内嵌联合体的信息，用于避免重复导出
+    embedded_unions = set()
+    
     # 存储结构体使用信息
     struct_uses = defaultdict(list)  # 结构体名 -> [(文件路径:函数名), ...]
     
@@ -215,6 +218,8 @@ def parse_file(file_path, args=None):
                             # 获取联合体内部的字段
                             union_fields = []
                             for union_child in union_children:
+                                # 记录内嵌联合体的信息
+                                embedded_unions.add(union_child.spelling)
                                 for union_field in union_child.get_children():
                                     if union_field.kind == clang.cindex.CursorKind.FIELD_DECL:
                                         union_field_name = union_field.spelling
@@ -297,7 +302,8 @@ def parse_file(file_path, args=None):
                     field_type = child.type.spelling
                     fields.append({"name": field_name, "type": field_type})
             
-            if union_name and fields:
+            # 只有当联合体不是内嵌的时候才记录它
+            if union_name and fields and union_name not in embedded_unions:
                 # 获取联合体定义的实际位置
                 definition_location = relative_path
                 if node.location.file:
