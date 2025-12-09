@@ -207,6 +207,24 @@ def parse_file(file_path, args=None):
                 if child.kind == clang.cindex.CursorKind.FIELD_DECL:
                     field_name = child.spelling
                     field_type = child.type.spelling
+                    # 检查字段是否是联合体
+                    union_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.UNION_DECL]
+                    if union_children:
+                        # 对于命名的联合体字段，获取联合体内部的字段信息
+                        if field_name:
+                            # 获取联合体内部的字段
+                            union_fields = []
+                            for union_child in union_children:
+                                for union_field in union_child.get_children():
+                                    if union_field.kind == clang.cindex.CursorKind.FIELD_DECL:
+                                        union_field_name = union_field.spelling
+                                        union_field_type = union_field.type.spelling
+                                        union_fields.append({"name": union_field_name, "type": union_field_type})
+                            # 构造包含联合体内部字段信息的类型描述
+                            field_type = {"union": union_fields}
+                        else:
+                            # 对于匿名联合体，添加union前缀
+                            field_type = "union " + field_type
                     fields.append({"name": field_name, "type": field_type})
             
             if struct_name and fields:
@@ -221,6 +239,77 @@ def parse_file(file_path, args=None):
                         
                 struct_fields[struct_name] = {
                     "struct": struct_name,
+                    "fields": fields,
+                    "defined_in": definition_location
+                }
+        # 联合体定义
+        elif node.kind == clang.cindex.CursorKind.UNION_DECL:
+            union_name = node.spelling
+            
+            # 对于匿名联合体或Clang无法正确识别名称的联合体，尝试多种方法获取正确名称
+            if not union_name or union_name.startswith("union (unnamed at"):
+                # 方法1: 检查语义父节点是否是typedef声明
+                semantic_parent = node.semantic_parent
+                if semantic_parent and semantic_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                    union_name = semantic_parent.spelling
+                # 方法2: 检查直接父节点是否是typedef声明
+                elif hasattr(node, 'lexical_parent'):
+                    lexical_parent = node.lexical_parent
+                    if lexical_parent and lexical_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                        union_name = lexical_parent.spelling
+                # 方法3: 在整个AST中查找是否有typedef声明引用了这个联合体
+                if not union_name or union_name.startswith("union (unnamed at"):
+                    # 遍历整个AST查找引用这个联合体的typedef声明
+                    def find_typedef_for_union(root_node, target_union_node):
+                        if root_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+                            # 检查typedef的子节点是否是我们正在处理的联合体
+                            for child in root_node.get_children():
+                                if child.kind == clang.cindex.CursorKind.UNION_DECL and child == target_union_node:
+                                    return root_node.spelling
+                        # 递归检查子节点
+                        for child in root_node.get_children():
+                            result = find_typedef_for_union(child, target_union_node)
+                            if result:
+                                return result
+                        return None
+                    
+                    typedef_name = find_typedef_for_union(tu.cursor, node)
+                    if typedef_name:
+                        union_name = typedef_name
+                # 方法4: 通过解析源代码获取typedef名称
+                if not union_name or union_name.startswith("union (unnamed at"):
+                    typedef_name = extract_typedef_name_from_source(file_path, node.location.line)
+                    if typedef_name:
+                        union_name = typedef_name
+                    else:
+                        # 如果无法通过解析获取，尝试使用displayname作为备选方案
+                        union_name = node.displayname if node.displayname else "unnamed_union"
+            
+            # 最后的备选方案
+            if not union_name:
+                union_name = "unnamed_union"
+            
+            # 收集联合体字段信息
+            fields = []
+            for child in node.get_children():
+                if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+                    field_name = child.spelling
+                    field_type = child.type.spelling
+                    fields.append({"name": field_name, "type": field_type})
+            
+            if union_name and fields:
+                # 获取联合体定义的实际位置
+                definition_location = relative_path
+                if node.location.file:
+                    node_file_path = os.path.abspath(node.location.file.name)
+                    try:
+                        definition_location = os.path.relpath(node_file_path, project_root)
+                    except ValueError:
+                        definition_location = node_file_path
+                        
+                # 为联合体创建一个特殊的条目，与结构体分开
+                struct_fields[union_name] = {
+                    "union": union_name,
                     "fields": fields,
                     "defined_in": definition_location
                 }
@@ -1036,12 +1125,31 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
     # 转换结构体信息格式
     struct_list = []
     for struct_name, info in struct_fields.items():
-        struct_item = {
-            "struct": struct_name,
-            "fields": info["fields"],
-            "defined_in": info["defined_in"],
-            "used_by": struct_uses.get(struct_name, [])
-        }
+        # 检查是结构体还是联合体
+        if "struct" in info:
+            # 结构体
+            struct_item = {
+                "struct": info["struct"],
+                "fields": info["fields"],
+                "defined_in": info["defined_in"],
+                "used_by": struct_uses.get(struct_name, [])
+            }
+        elif "union" in info:
+            # 联合体
+            struct_item = {
+                "union": info["union"],
+                "fields": info["fields"],
+                "defined_in": info["defined_in"],
+                "used_by": struct_uses.get(struct_name, [])
+            }
+        else:
+            # 默认情况下，假设是结构体
+            struct_item = {
+                "struct": struct_name,
+                "fields": info["fields"],
+                "defined_in": info["defined_in"],
+                "used_by": struct_uses.get(struct_name, [])
+            }
         struct_list.append(struct_item)
     
     with open(file_name, "w") as f:

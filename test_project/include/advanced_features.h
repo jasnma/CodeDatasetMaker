@@ -68,6 +68,35 @@ typedef struct {
     void (*callback)(void);
 } CallbackStruct;
 
+typedef unsigned char uint8_t;
+typedef unsigned short uint16_t;
+
+/* String character encodings */
+typedef enum {
+    J_ST_ASCII,
+    J_ST_UTF8,
+    J_ST_UTF16,
+    J_ST_UTF16BE, /* Only valid for @src_type parameters */
+    J_ST_UTF16LE  /* Only valid for @src_type parameters */
+} j_string_type_t;
+
+typedef union {
+    char ascii_tag;
+    uint8_t utf8_tag;
+    uint16_t utf16_tag;
+} string_tag;
+
+/* JOS string */
+typedef struct {
+    j_string_type_t type;
+    string_tag tag;
+    union {
+        char     ascii[1];
+        uint8_t  utf8[1];
+        uint16_t utf16[1];
+    } s;
+} j_string_t;
+
 // 全局变量声明
 extern j_uint64_t global_uint64;
 extern Person global_person;
