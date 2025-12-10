@@ -34,27 +34,41 @@ def get_c_files(directory):
 def process_union(node, project_root):
     union_name = node.spelling
 
+    # 收集内嵌结构体与联合体信息
+    embedded_childrens = {}
     # 收集联合体字段信息
     fields = []
     for child in node.get_children():
-        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+        if child.kind == clang.cindex.CursorKind.UNION_DECL:
+            embedded_union_name = child.get_usr()
+            union_info = process_union(child, project_root)
+            if union_info:
+                # 构造包含联合体内部字段信息的类型描述
+                field_type = {"union": union_info["fields"]}
+                embedded_childrens[embedded_union_name] = field_type
+        elif (child.kind == clang.cindex.CursorKind.STRUCT_DECL):
+            embedded_struct_name = child.get_usr()
+            struct_info = process_struct(child, project_root)
+            if struct_info:
+                field_type = {"struct": struct_info["fields"]}
+                embedded_childrens[embedded_struct_name] = field_type
+        elif child.kind == clang.cindex.CursorKind.FIELD_DECL:
             field_name = child.spelling
             field_type = child.type.spelling
-            
-            # 检查字段类型是否为结构体
-            struct_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.STRUCT_DECL]
-            if struct_children:
-                if field_name:
-                    for struct_child in struct_children:
-                        child_struct_info = process_struct(struct_child, project_root)
-                        if child_struct_info:
-                            # 构造包含结构体内部字段信息的类型描述
-                            field_type = {"sturct": child_struct_info["fields"]}
+            type_user = child.type.get_canonical().get_declaration().get_usr()
+            if (type_user in embedded_childrens):
+                field_type = embedded_childrens[type_user]
+                del embedded_childrens[type_user]
 
             if field_name and field_type:
                 fields.append({"name": field_name, "type": field_type})
 
-    # 只有当联合体不是内嵌的时候才记录它
+    if embedded_childrens:
+        unnamed_childrens = []
+        for child in embedded_childrens:
+            unnamed_childrens.append(embedded_childrens[child])
+        fields.append({"name": "unnamed", "fields": unnamed_childrens})
+
     if union_name and fields:
         # 获取联合体定义的实际位置
         if node.location.file:
@@ -76,36 +90,41 @@ def process_union(node, project_root):
 def process_struct(node, project_root):
     struct_name = node.spelling
     
+    # 收集内嵌结构体与联合体信息
+    embedded_childrens = {}
     # 收集结构体字段信息
     fields = []
     for child in node.get_children():
-        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+        if child.kind == clang.cindex.CursorKind.UNION_DECL and child.is_definition():
+            embedded_union_name = child.get_usr()
+            union_info = process_union(child, project_root)
+            if union_info:
+                # 构造包含联合体内部字段信息的类型描述
+                field_type = {"union": union_info["fields"]}
+                embedded_childrens[embedded_union_name] = field_type
+        elif (child.kind == clang.cindex.CursorKind.STRUCT_DECL) and child.is_definition():
+            embedded_struct_name = child.get_usr()
+            struct_info = process_struct(child, project_root)
+            if struct_info:
+                field_type = {"struct": struct_info["fields"]}
+                embedded_childrens[embedded_struct_name] = field_type
+        elif (child.kind == clang.cindex.CursorKind.FIELD_DECL):
             field_name = child.spelling
             field_type = child.type.spelling
-            # 检查字段是否是联合体
-            union_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.UNION_DECL]
-            if union_children:
-                # 对于命名的联合体字段，获取联合体内部的字段信息
-                if field_name:
-                    for union_child in union_children:
-                        union_info = process_union(union_child, project_root)
-                        if union_info:
-                            # 构造包含联合体内部字段信息的类型描述
-                            field_type = {"union": union_info["fields"]}
-            else:
-                # 检查字段是否是结构体
-                struct_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.STRUCT_DECL]
-                if struct_children:
-                    if field_name:
-                        for struct_child in struct_children:
-                            child_struct_info = process_struct(struct_child, project_root)
-                            if child_struct_info:
-                                # 构造包含结构体内部字段信息的类型描述
-                                field_type = {"sturct": child_struct_info["fields"]}
+            type_user = child.type.get_canonical().get_declaration().get_usr()
+            if (type_user in embedded_childrens):
+                field_type = embedded_childrens[type_user]
+                del embedded_childrens[type_user]
 
             if field_name and field_type:
                 fields.append({"name": field_name, "type": field_type})
-    
+
+    if embedded_childrens:
+        unnamed_childrens = []
+        for child in embedded_childrens:
+            unnamed_childrens.append(embedded_childrens[child])
+        fields.append({"name": "unnamed", "fields": unnamed_childrens})
+
     if struct_name and fields:
         # 获取结构体定义的实际位置
         if node.location.file:
@@ -120,6 +139,8 @@ def process_struct(node, project_root):
             "fields": fields,
             "defined_in": definition_location
         }
+    else:
+        print(f"Warning: Skipping non-struct node: {node.spelling}")
 
     return None
 

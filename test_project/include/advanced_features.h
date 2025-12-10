@@ -118,6 +118,33 @@ union advanced_features
     } b;
 };
 
+struct test_nickname {
+    union
+    {
+        int POSITION;
+        struct
+        {
+            int16_t x;
+            int16_t y;
+        } POSITION_X_Y;
+    };
+    union
+    {
+        int POSITION2;
+        struct
+        {
+            int16_t x;
+            int16_t y;
+        } POSITION_X_Y_2;
+    };
+
+    struct
+    {
+        int16_t x;
+        int16_t y;
+    };
+};
+
 // 全局变量声明
 extern j_uint64_t global_uint64;
 extern Person global_person;
