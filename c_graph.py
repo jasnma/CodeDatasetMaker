@@ -73,9 +73,6 @@ def process_union(node, project_root):
 def process_struct(node, project_root):
     struct_name = node.spelling
     
-    if struct_name and struct_name not in file_info["structs"]:
-        file_info["structs"].append(struct_name)
-
     # 收集结构体字段信息
     fields = []
     for child in node.get_children():
@@ -641,22 +638,6 @@ def parse_file(file_path, args=None):
             visit_node(c, current_func)
 
     visit_node(tu.cursor)
-    
-    # 通过正则表达式额外提取宏使用情况，补充Clang可能遗漏的部分
-    # extract_macro_uses_from_source(file_path, macro_uses, relative_path)
-
-    # 通过正则表达式额外提取宏定义，补充Clang可能遗漏的部分
-    # extract_macros_from_source(file_path, file_info)
-    
-    # 收集包含目录用于检查头文件
-    include_dirs = [os.path.dirname(file_path)]  # 添加当前文件所在目录
-    if args:
-        for arg in args:
-            if arg.startswith("-I"):
-                include_dirs.append(arg[2:])  # 移除"-I"前缀
-    
-    # 通过正则表达式额外提取包含文件，补充Clang可能遗漏的部分
-    # extract_includes_from_source(file_path, file_info, include_dirs)
     
     return call_graph, relative_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses
 
