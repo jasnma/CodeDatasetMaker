@@ -4,6 +4,7 @@ import argparse
 import os
 import json
 import re
+import time
 import clang.cindex
 from anytree import Node, RenderTree
 import xml.etree.ElementTree as ET
@@ -80,7 +81,16 @@ def parse_file(file_path, args=None):
     macro_defs = {}  # 宏名 -> (内容, 文件路径)
     macro_uses = defaultdict(list)  # 宏名 -> [(文件路径:函数名/上下文), ...]
     
+    # 在visit_node函数外部定义一个变量来存储上次输出的时间
+    last_print_time = [0.0]
+    
     def visit_node(node, current_func=None):
+        # 控制输出频率，只有在时间超过1秒时才输出
+        current_time = time.time()
+        if current_time - last_print_time[0] > 1.0:
+            print(f"Visiting node: {node.kind}, {node.spelling if node.spelling else 'Unnamed'}")
+            last_print_time[0] = current_time
+            
         # 处理所有节点，包括来自头文件的节点
         # 但要避免无限递归，只处理项目内的文件
         if node.location.file:
