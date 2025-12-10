@@ -70,6 +70,9 @@ def process_union(node, project_root):
             "fields": fields,
             "defined_in": definition_location
         }
+    
+    return None
+
 def process_struct(node, project_root):
     struct_name = node.spelling
     
@@ -119,6 +122,7 @@ def process_struct(node, project_root):
         }
 
     return None
+
 def parse_file(file_path, args=None):
     index = clang.cindex.Index.create()
     if args is None:
