@@ -16,10 +16,18 @@
 #define SQUARE(x) ((x) * (x))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
+#define TAILQ_ENTRY(type)                                               \
+struct {                                                                \
+    struct type *tqe_next;  /* next element */                          \
+    struct type *tqe_prev; /* address of previous next element */      \
+}
+
 // 结构体定义
 typedef struct {
     int id;
     char name[32];
+
+    TAILQ_ENTRY(Person) next;
 } Person;
 
 typedef struct {
@@ -96,6 +104,19 @@ typedef struct {
         uint16_t utf16[1];
     } s;
 } j_string_t;
+
+union advanced_features
+{
+    struct {
+        int a_value;
+        int a_count;
+    } a;
+
+    struct {
+        int b_value;
+        int b_count;
+    } b;
+};
 
 // 全局变量声明
 extern j_uint64_t global_uint64;

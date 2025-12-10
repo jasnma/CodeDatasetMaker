@@ -31,6 +31,97 @@ def get_c_files(directory):
                 c_files.append(os.path.join(root, file))
     return c_files
 
+def process_union(node, project_root):
+    union_name = node.spelling
+
+    # 收集联合体字段信息
+    fields = []
+    for child in node.get_children():
+        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+            field_name = child.spelling
+            field_type = child.type.spelling
+            
+            # 检查字段类型是否为结构体
+            struct_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.STRUCT_DECL]
+            if struct_children:
+                if field_name:
+                    for struct_child in struct_children:
+                        child_struct_info = process_struct(struct_child, project_root)
+                        if child_struct_info:
+                            # 构造包含结构体内部字段信息的类型描述
+                            field_type = {"sturct": child_struct_info["fields"]}
+
+            if field_name and field_type:
+                fields.append({"name": field_name, "type": field_type})
+
+    # 只有当联合体不是内嵌的时候才记录它
+    if union_name and fields:
+        # 获取联合体定义的实际位置
+        if node.location.file:
+            node_file_path = os.path.abspath(node.location.file.name)
+            try:
+                definition_location = os.path.relpath(node_file_path, project_root)
+            except ValueError:
+                definition_location = node_file_path
+
+        # 为联合体创建一个特殊的条目，与结构体分开
+        return {
+            "union": union_name,
+            "fields": fields,
+            "defined_in": definition_location
+        }
+def process_struct(node, project_root):
+    struct_name = node.spelling
+    
+    if struct_name and struct_name not in file_info["structs"]:
+        file_info["structs"].append(struct_name)
+
+    # 收集结构体字段信息
+    fields = []
+    for child in node.get_children():
+        if child.kind == clang.cindex.CursorKind.FIELD_DECL:
+            field_name = child.spelling
+            field_type = child.type.spelling
+            # 检查字段是否是联合体
+            union_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.UNION_DECL]
+            if union_children:
+                # 对于命名的联合体字段，获取联合体内部的字段信息
+                if field_name:
+                    for union_child in union_children:
+                        union_info = process_union(union_child, project_root)
+                        if union_info:
+                            # 构造包含联合体内部字段信息的类型描述
+                            field_type = {"union": union_info["fields"]}
+            else:
+                # 检查字段是否是结构体
+                struct_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.STRUCT_DECL]
+                if struct_children:
+                    if field_name:
+                        for struct_child in struct_children:
+                            child_struct_info = process_struct(struct_child, project_root)
+                            if child_struct_info:
+                                # 构造包含结构体内部字段信息的类型描述
+                                field_type = {"sturct": child_struct_info["fields"]}
+
+            if field_name and field_type:
+                fields.append({"name": field_name, "type": field_type})
+    
+    if struct_name and fields:
+        # 获取结构体定义的实际位置
+        if node.location.file:
+            node_file_path = os.path.abspath(node.location.file.name)
+            try:
+                definition_location = os.path.relpath(node_file_path, project_root)
+            except ValueError:
+                definition_location = node_file_path
+                
+        return {
+            "struct": struct_name,
+            "fields": fields,
+            "defined_in": definition_location
+        }
+
+    return None
 def parse_file(file_path, args=None):
     index = clang.cindex.Index.create()
     if args is None:
@@ -166,6 +257,10 @@ def parse_file(file_path, args=None):
                     call_graph[current_func].append(called_func_name)
         # 结构体定义
         elif node.kind == clang.cindex.CursorKind.STRUCT_DECL:
+            struct_info = process_struct(node, project_root)
+            if not struct_info:
+                return
+
             struct_name = node.spelling
             
             # 对于匿名结构体或Clang无法正确识别名称的结构体，尝试多种方法获取正确名称
@@ -213,54 +308,25 @@ def parse_file(file_path, args=None):
             
             if struct_name and struct_name not in file_info["structs"]:
                 file_info["structs"].append(struct_name)
-                
-            # 收集结构体字段信息
-            fields = []
-            for child in node.get_children():
-                if child.kind == clang.cindex.CursorKind.FIELD_DECL:
-                    field_name = child.spelling
-                    field_type = child.type.spelling
-                    # 检查字段是否是联合体
-                    union_children = [grandchild for grandchild in child.get_children() if grandchild.kind == clang.cindex.CursorKind.UNION_DECL]
-                    if union_children:
-                        # 对于命名的联合体字段，获取联合体内部的字段信息
-                        if field_name:
-                            # 获取联合体内部的字段
-                            union_fields = []
-                            for union_child in union_children:
-                                # 记录内嵌联合体的信息
-                                embedded_unions.add(union_child.spelling)
-                                for union_field in union_child.get_children():
-                                    if union_field.kind == clang.cindex.CursorKind.FIELD_DECL:
-                                        union_field_name = union_field.spelling
-                                        union_field_type = union_field.type.spelling
-                                        union_fields.append({"name": union_field_name, "type": union_field_type})
-                            # 构造包含联合体内部字段信息的类型描述
-                            field_type = {"union": union_fields}
-                        else:
-                            # 对于匿名联合体，添加union前缀
-                            field_type = "union " + field_type
-                    fields.append({"name": field_name, "type": field_type})
             
-            if struct_name and fields:
+            struct_info["struct"] = struct_name
+            if struct_name and struct_info:
                 # 获取结构体定义的实际位置
-                definition_location = relative_path
-                if node.location.file:
-                    node_file_path = os.path.abspath(node.location.file.name)
-                    try:
-                        definition_location = os.path.relpath(node_file_path, project_root)
-                    except ValueError:
-                        definition_location = node_file_path
+                definition_location = struct_info["defined_in"]
+                if not definition_location:
+                    definition_location = relative_path
+                    struct_info["defined_in"] = definition_location
                         
-                struct_fields[struct_name] = {
-                    "struct": struct_name,
-                    "fields": fields,
-                    "defined_in": definition_location
-                }
+                struct_fields[struct_name] = struct_info
+
+            # struct 定义子节点已经全部处理完毕，返回
+            return
+                
         # 联合体定义
         elif node.kind == clang.cindex.CursorKind.UNION_DECL:
             union_name = node.spelling
-            
+            union_info = process_union(node, project_root)
+
             # 对于匿名联合体或Clang无法正确识别名称的联合体，尝试多种方法获取正确名称
             if not union_name or union_name.startswith("union (unnamed at"):
                 # 方法1: 检查语义父节点是否是typedef声明
@@ -303,32 +369,17 @@ def parse_file(file_path, args=None):
             # 最后的备选方案
             if not union_name:
                 union_name = "unnamed_union"
-            
-            # 收集联合体字段信息
-            fields = []
-            for child in node.get_children():
-                if child.kind == clang.cindex.CursorKind.FIELD_DECL:
-                    field_name = child.spelling
-                    field_type = child.type.spelling
-                    fields.append({"name": field_name, "type": field_type})
-            
-            # 只有当联合体不是内嵌的时候才记录它
-            if union_name and fields and union_name not in embedded_unions:
+
+            if union_name and union_info:
                 # 获取联合体定义的实际位置
-                definition_location = relative_path
-                if node.location.file:
-                    node_file_path = os.path.abspath(node.location.file.name)
-                    try:
-                        definition_location = os.path.relpath(node_file_path, project_root)
-                    except ValueError:
-                        definition_location = node_file_path
+                if not union_info["defined_in"]:
+                    union_info["defined_in"] = relative_path
                         
                 # 为联合体创建一个特殊的条目，与结构体分开
-                struct_fields[union_name] = {
-                    "union": union_name,
-                    "fields": fields,
-                    "defined_in": definition_location
-                }
+                struct_fields[union_name] = union_info
+
+            # union 字节点已处理完毕，返回
+            return
         # 宏定义
         elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
             macro_name = node.spelling
