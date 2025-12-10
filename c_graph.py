@@ -1294,29 +1294,27 @@ if __name__ == "__main__":
     all_global_var_uses = defaultdict(list)  # 存储所有全局变量使用
     all_macro_defs = {}  # 存储所有宏定义
     all_macro_uses = defaultdict(list)  # 存储所有宏使用信息
+
+    # 添加更多参数以启用详细的AST解析
+    parse_args = [
+        project_dir, 
+        "-I./include",
+        "-I" + os.path.join(project_dir, "include"),
+        "-I/usr/include",
+        "-I/usr/local/include"
+    ]
     
+    # 添加从项目文件中提取的包含路径
+    # 直接使用从项目配置中读取的路径
+    for include_path in project_include_paths:
+        parse_args.append("-I" + include_path)
+    
+    # 添加从项目文件中提取的预处理宏定义
+    for macro_name, macro_value in project_macros.items():
+        parse_args.append("-D" + macro_name + "=" + macro_value)
+
     for f in c_files:
-        # 添加更多参数以启用详细的AST解析
-        parse_args = [
-            project_dir, 
-            "-I./include",
-            "-I" + os.path.join(project_dir, "include"),
-            "-I/usr/include",
-            "-I/usr/local/include"
-        ]
-        
-        # 添加从项目文件中提取的包含路径
-        # 直接使用从项目配置中读取的路径
-        for include_path in project_include_paths:
-            parse_args.append("-I" + include_path)
-        
-        # 添加从项目文件中提取的预处理宏定义
-        for macro_name, macro_value in project_macros.items():
-            parse_args.append("-D" + macro_name + "=" + macro_value)
-        
         graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, args=parse_args)
-        if not graph:
-            continue
 
         # 合并到全局调用关系
         for func, callees in graph.items():
