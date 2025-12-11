@@ -22,6 +22,19 @@ struct {                                                                \
     struct type *tqe_prev; /* address of previous next element */      \
 }
 
+typedef union
+{
+    struct
+    {
+        int32_t _reserved0 : 28; /*!< bit:  0..27  Reserved */
+        int32_t V : 1;           /*!< bit:     28  Overflow condition code flag */
+        int32_t C : 1;           /*!< bit:     29  Carry condition code flag */
+        int32_t Z : 1;           /*!< bit:     30  Zero condition code flag */
+        int32_t N : 1;           /*!< bit:     31  Negative condition code flag */
+    } b;                        /*!< Structure used for bit  access */
+    int32_t w;                 /*!< Type      used for word access */
+} APSR_Type;
+
 // 结构体定义
 typedef struct {
     int id;

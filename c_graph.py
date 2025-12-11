@@ -144,7 +144,13 @@ def process_struct(node, project_root):
 
     return None
 
-def parse_file(file_path, args=None):
+def print_ast(node, indent=0):
+    prefix = "  " * indent
+    print(f"{prefix}{node.kind} {node.spelling} [{node.type.spelling}]")
+    for child in node.get_children():
+        print_ast(child, indent + 1)
+
+def parse_file(file_path, struct_union_maps, args=None):
     index = clang.cindex.Index.create()
     if args is None:
         args = []
@@ -157,6 +163,7 @@ def parse_file(file_path, args=None):
                 clang.cindex.TranslationUnit.PARSE_PRECOMPILED_PREAMBLE |
                 clang.cindex.TranslationUnit.PARSE_DETAILED_PROCESSING_RECORD
     )
+
     call_graph = {}
     
     # 存储文件的信息
@@ -180,9 +187,6 @@ def parse_file(file_path, args=None):
     # 存储结构体字段信息
     struct_fields = {}
     
-    # 存储内嵌联合体的信息，用于避免重复导出
-    embedded_unions = set()
-    
     # 存储结构体使用信息
     struct_uses = defaultdict(list)  # 结构体名 -> [(文件路径:函数名), ...]
     
@@ -197,7 +201,7 @@ def parse_file(file_path, args=None):
     # 在visit_node函数外部定义一个变量来存储上次输出的时间
     last_print_time = [0.0]
     
-    def visit_node(node, current_func=None):
+    def visit_node(node, current_func=None, parent_node=None):
         # 控制输出频率，只有在时间超过1秒时才输出
         current_time = time.time()
         if current_time - last_print_time[0] > 1.0:
@@ -212,7 +216,7 @@ def parse_file(file_path, args=None):
             if not node_file_path.startswith(os.path.abspath(project_root)):
                 # 不在项目目录内的文件（如系统头文件）不需要处理
                 return
-            
+
         # 如果节点不属于任何文件（如根节点），也进行处理
             
         # 函数定义
@@ -259,7 +263,7 @@ def parse_file(file_path, args=None):
                                         
                 # 继续遍历子节点以处理函数体内的调用
                 for c in node.get_children():
-                    visit_node(c, current_func)
+                    visit_node(c, current_func, node)
             else:
                 # 这是函数声明，不是定义，我们不处理它
                 pass
@@ -278,55 +282,26 @@ def parse_file(file_path, args=None):
                 if called_func_name:
                     call_graph[current_func].append(called_func_name)
         # 结构体定义
-        elif node.kind == clang.cindex.CursorKind.STRUCT_DECL:
-            struct_info = process_struct(node, project_root)
+        elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.is_definition():
+            struct_info = None
+            struct_usr = node.get_usr()
+            if (struct_usr in struct_union_maps):
+                struct_info = struct_union_maps[struct_usr]
+                struct_name = struct_info["struct"]
+            else:
+                struct_info = process_struct(node, project_root)
+                struct_union_maps[struct_usr] = struct_info
+                struct_name = node.spelling
             if not struct_info:
                 return
-
-            struct_name = node.spelling
             
             # 对于匿名结构体或Clang无法正确识别名称的结构体，尝试多种方法获取正确名称
             if not struct_name or struct_name.startswith("struct (unnamed at"):
-                # 方法1: 检查语义父节点是否是typedef声明
-                semantic_parent = node.semantic_parent
-                if semantic_parent and semantic_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                    struct_name = semantic_parent.spelling
-                # 方法2: 检查直接父节点是否是typedef声明
-                elif hasattr(node, 'lexical_parent'):
-                    lexical_parent = node.lexical_parent
-                    if lexical_parent and lexical_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                        struct_name = lexical_parent.spelling
-                # 方法3: 在整个AST中查找是否有typedef声明引用了这个结构体
-                if not struct_name or struct_name.startswith("struct (unnamed at"):
-                    # 遍历整个AST查找引用这个结构体的typedef声明
-                    def find_typedef_for_struct(root_node, target_struct_node):
-                        if root_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                            # 检查typedef的子节点是否是我们正在处理的结构体
-                            for child in root_node.get_children():
-                                if child.kind == clang.cindex.CursorKind.STRUCT_DECL and child == target_struct_node:
-                                    return root_node.spelling
-                        # 递归检查子节点
-                        for child in root_node.get_children():
-                            result = find_typedef_for_struct(child, target_struct_node)
-                            if result:
-                                return result
-                        return None
-                    
-                    typedef_name = find_typedef_for_struct(tu.cursor, node)
-                    if typedef_name:
-                        struct_name = typedef_name
-                # 方法4: 通过解析源代码获取typedef名称
-                if not struct_name or struct_name.startswith("struct (unnamed at"):
-                    typedef_name = extract_typedef_name_from_source(file_path, node.location.line)
-                    if typedef_name:
-                        struct_name = typedef_name
-                    else:
-                        # 如果无法通过解析获取，尝试使用displayname作为备选方案
-                        struct_name = node.displayname if node.displayname else "unnamed_struct"
-            
-            # 最后的备选方案
-            if not struct_name:
-                struct_name = "unnamed_struct"
+                # 方法1: 使用parent_node的spelling
+                if (parent_node and parent_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL):
+                    struct_name =  parent_node.spelling
+                else:
+                    return
             
             if struct_name and struct_name not in file_info["structs"]:
                 file_info["structs"].append(struct_name)
@@ -345,53 +320,28 @@ def parse_file(file_path, args=None):
             return
                 
         # 联合体定义
-        elif node.kind == clang.cindex.CursorKind.UNION_DECL:
-            union_name = node.spelling
-            union_info = process_union(node, project_root)
+        elif node.kind == clang.cindex.CursorKind.UNION_DECL and node.is_definition():
+            union_info = None
+            union_usr = node.get_usr()
+            if (union_usr in struct_union_maps):
+                union_info = struct_union_maps[union_usr]
+                union_name = union_info["union"]
+            else:
+                union_info = process_union(node, project_root)
+                struct_union_maps[union_usr] = union_info
+                union_name = union_info["union"]
+            if not union_info:
+                return
 
             # 对于匿名联合体或Clang无法正确识别名称的联合体，尝试多种方法获取正确名称
             if not union_name or union_name.startswith("union (unnamed at"):
-                # 方法1: 检查语义父节点是否是typedef声明
-                semantic_parent = node.semantic_parent
-                if semantic_parent and semantic_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                    union_name = semantic_parent.spelling
-                # 方法2: 检查直接父节点是否是typedef声明
-                elif hasattr(node, 'lexical_parent'):
-                    lexical_parent = node.lexical_parent
-                    if lexical_parent and lexical_parent.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                        union_name = lexical_parent.spelling
-                # 方法3: 在整个AST中查找是否有typedef声明引用了这个联合体
-                if not union_name or union_name.startswith("union (unnamed at"):
-                    # 遍历整个AST查找引用这个联合体的typedef声明
-                    def find_typedef_for_union(root_node, target_union_node):
-                        if root_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
-                            # 检查typedef的子节点是否是我们正在处理的联合体
-                            for child in root_node.get_children():
-                                if child.kind == clang.cindex.CursorKind.UNION_DECL and child == target_union_node:
-                                    return root_node.spelling
-                        # 递归检查子节点
-                        for child in root_node.get_children():
-                            result = find_typedef_for_union(child, target_union_node)
-                            if result:
-                                return result
-                        return None
-                    
-                    typedef_name = find_typedef_for_union(tu.cursor, node)
-                    if typedef_name:
-                        union_name = typedef_name
-                # 方法4: 通过解析源代码获取typedef名称
-                if not union_name or union_name.startswith("union (unnamed at"):
-                    typedef_name = extract_typedef_name_from_source(file_path, node.location.line)
-                    if typedef_name:
-                        union_name = typedef_name
-                    else:
-                        # 如果无法通过解析获取，尝试使用displayname作为备选方案
-                        union_name = node.displayname if node.displayname else "unnamed_union"
-            
-            # 最后的备选方案
-            if not union_name:
-                union_name = "unnamed_union"
+                # 方法1: 使用parent_node的spelling
+                if (parent_node and parent_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL):
+                    union_name =  parent_node.spelling
+                else:
+                    return
 
+            union_info["union"] = union_name
             if union_name and union_info:
                 # 获取联合体定义的实际位置
                 if not union_info["defined_in"]:
@@ -648,7 +598,7 @@ def parse_file(file_path, args=None):
                             
             # 继续遍历子节点以处理函数内部的使用情况
             for c in node.get_children():
-                visit_node(c, node.spelling)
+                visit_node(c, node.spelling, node)
         # 检查是否是宏使用（通过标识符引用）
         elif node.kind == clang.cindex.CursorKind.MACRO_INSTANTIATION:
             macro_name = node.spelling
@@ -660,10 +610,10 @@ def parse_file(file_path, args=None):
         
         # 遍历子节点
         for c in node.get_children():
-            visit_node(c, current_func)
+            visit_node(c, current_func, node)
 
     visit_node(tu.cursor)
-    
+
     return call_graph, relative_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses
 
 def extract_macros_from_source(file_path, file_info):
@@ -1384,8 +1334,12 @@ if __name__ == "__main__":
     for macro_name, macro_value in project_macros.items():
         parse_args.append("-D" + macro_name + "=" + macro_value)
 
+        
+    # 保存未命名的结构与联合定义，后续如果再遇到同样的定义则不用解析
+    struct_union_maps = {}
+
     for f in c_files:
-        graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, args=parse_args)
+        graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, struct_union_maps, args=parse_args)
 
         # 合并到全局调用关系
         for func, callees in graph.items():
