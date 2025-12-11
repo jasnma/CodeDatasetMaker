@@ -812,6 +812,7 @@ def extract_include_paths_from_project(project_dir):
         for file in files:
             if file.endswith(('.uvproj', '.uvprojx')):
                 project_file = os.path.join(root, file)
+                print(f"Found project file: {project_file}")
                 try:
                     # 解析XML文件
                     tree = ET.parse(project_file)
@@ -828,9 +829,11 @@ def extract_include_paths_from_project(project_dir):
                             for path in paths:
                                 path = path.strip()
                                 if path and path not in include_paths:
+                                    path = path.replace("\\", "/")
                                     # 将相对路径转换为绝对路径
                                     if not os.path.isabs(path):
                                         path = os.path.join(os.path.dirname(project_file), path)
+                                        path = os.path.normpath(path)
                                     include_paths.append(path)
                 except Exception as e:
                     # 忽略解析错误
@@ -891,6 +894,7 @@ def extract_preprocessor_macros_from_project(project_dir):
         for file in files:
             if file.endswith(('.uvproj', '.uvprojx')):
                 project_file = os.path.join(root, file)
+                print(f"Found project file: {project_file}")
                 try:
                     # 解析XML文件
                     tree = ET.parse(project_file)
