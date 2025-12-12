@@ -289,9 +289,27 @@ def parse_file(file_path, struct_union_maps, args=None):
             
             # 只有函数定义才添加到函数列表和调用图中
             if is_definition:
+                # 计算函数的起始行号和结束行号
+                start_line = node.location.line
+                end_line = start_line
+                
+                # 遍历函数的所有子节点，找到最大的行号作为结束行号
+                def find_max_line(cursor, max_line):
+                    if cursor.location.line > max_line:
+                        max_line = cursor.location.line
+                    for child in cursor.get_children():
+                        max_line = find_max_line(child, max_line)
+                    return max_line
+                
+                end_line = find_max_line(node, end_line)
+                
                 # 添加到函数列表
                 if func_name and func_name not in file_info["functions"]:
-                    file_info["functions"].append(func_name)
+                    file_info["functions"].append({
+                        "name": func_name,
+                        "start_line": start_line,
+                        "end_line": end_line
+                    })
                 # 使用文件路径作为前缀来区分同名函数
                 if func_name:
                     unique_func_name = f"{relative_path}:{func_name}"
@@ -465,7 +483,23 @@ def parse_file(file_path, struct_union_maps, args=None):
                             # 获取宏定义所在的行
                             line_num = node.location.line - 1  # 行号从1开始，索引从0开始
                             if line_num < len(lines):
-                                macro_content = lines[line_num].strip()
+                                # 处理多行宏定义
+                                line = lines[line_num].rstrip().rstrip('\\').rstrip()
+                                macro_lines = [line]
+                                # 检查是否是多行宏定义（以\结尾）
+                                j = line_num + 1
+                                if j < len(lines) and lines[j].rstrip().endswith('\\'):
+                                    while j < len(lines) and lines[j].rstrip().endswith('\\'):
+                                        line = lines[j].rstrip()
+                                        line = line.rstrip('\\').rstrip()
+                                        macro_lines.append(line)
+                                        j += 1
+                                    # 添加最后一行（不以\结尾的行）
+                                    if j < len(lines) and lines[j].strip():
+                                        macro_lines.append(lines[j].rstrip())
+                                
+                                # 重新构造宏定义内容
+                                macro_content = '\n'.join(macro_lines)
                                 
                         # 更新宏定义的位置信息
                         macro_definition_path = macro_relative_path
@@ -476,7 +510,19 @@ def parse_file(file_path, struct_union_maps, args=None):
                             # 获取宏定义所在的行
                             line_num = node.location.line - 1  # 行号从1开始，索引从0开始
                             if line_num < len(lines):
-                                macro_content = lines[line_num].strip()
+                                # 处理多行宏定义
+                                macro_lines = [lines[line_num].rstrip()]
+                                # 检查是否是多行宏定义（以\结尾）
+                                j = line_num + 1
+                                while j < len(lines) and lines[j].rstrip().endswith('\\'):
+                                    macro_lines.append(lines[j].rstrip())
+                                    j += 1
+                                # 添加最后一行（不以\结尾的行）
+                                if j < len(lines) and lines[j].strip():
+                                    macro_lines.append(lines[j].rstrip())
+                                
+                                # 重新构造宏定义内容
+                                macro_content = '\n'.join(macro_lines)
                         macro_definition_path = relative_path
                 else:
                     # 如果没有文件信息，使用当前文件路径
@@ -485,7 +531,19 @@ def parse_file(file_path, struct_union_maps, args=None):
                         # 获取宏定义所在的行
                         line_num = node.location.line - 1  # 行号从1开始，索引从0开始
                         if line_num < len(lines):
-                            macro_content = lines[line_num].strip()
+                            # 处理多行宏定义
+                            macro_lines = [lines[line_num].rstrip()]
+                            # 检查是否是多行宏定义（以\结尾）
+                            j = line_num + 1
+                            while j < len(lines) and lines[j].rstrip().endswith('\\'):
+                                macro_lines.append(lines[j].rstrip())
+                                j += 1
+                            # 添加最后一行（不以\结尾的行）
+                            if j < len(lines) and lines[j].strip():
+                                macro_lines.append(lines[j].rstrip())
+                            
+                            # 重新构造宏定义内容
+                            macro_content = '\n'.join(macro_lines)
                     macro_definition_path = relative_path
             except:
                 # 如果出现异常，使用当前文件路径
@@ -1390,10 +1448,62 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
                     break
         
         # 如果不是 Clang 内置宏，则添加到列表中
+        macro_value = ""
         if not is_clang_builtin:
+            # 提取宏定义的值，去除定义名字部分
+            if content:
+                # 使用正则表达式提取宏定义的值，去除定义名字部分
+                # 匹配 #define MACRO_NAME VALUE 或 #define MACRO_NAME(VALUE) VALUE 这样的模式
+                # 首先尝试匹配带参数的宏定义
+                match = re.match(r'^\s*#\s*define\s+' + re.escape(macro_name) + r'\s*\([^)]*\)\s*(.*)$', content, re.DOTALL)
+                if match:
+                    macro_value = match.group(1).strip()
+                else:
+                    # 然后尝试匹配不带参数的宏定义
+                    match = re.match(r'^\s*#\s*define\s+' + re.escape(macro_name) + r'\s*(.*)$', content, re.DOTALL)
+                    if match:
+                        macro_value = match.group(1).strip()
+                    else:
+                        # 如果没有匹配到，可能是没有值的宏定义（如 #define MACRO_NAME）
+                        # 或者是多行宏定义，这种情况下我们保留原始内容
+                        macro_value = content
+                
+                # 对于多行宏定义，我们还需要进一步处理以去除定义名字部分
+                # 如果宏值中还包含宏定义本身，我们需要去除它
+                lines = macro_value.split('\n')
+                cleaned_lines = []
+                for line in lines:
+                    # 检查每一行是否包含宏定义
+                    if line.strip().startswith("#define "):
+                        # 提取宏定义之后的内容
+                        line_match = re.match(r'^#\s*define\s+\w+(?:\s*\([^)]*\))?\s*(.*)$', line)
+                        if line_match:
+                            cleaned_lines.append(line_match.group(1))
+                        else:
+                            # 如果没有匹配到，保留空字符串（对于没有值的宏定义）
+                            cleaned_lines.append("")
+                    else:
+                        # 不是宏定义的行直接保留
+                        cleaned_lines.append(line)
+                macro_value = '\n'.join(cleaned_lines).strip()
+                
+                # 如果处理后的结果以宏名开头，再次处理
+                if macro_value.startswith("#define " + macro_name):
+                    lines = macro_value.split('\n')
+                    # 去除第一行的宏定义部分
+                    first_line_match = re.match(r'^#\s*define\s+' + re.escape(macro_name) + r'(?:\s*\([^)]*\))?\s*(.*)$', lines[0])
+                    if first_line_match:
+                        lines[0] = first_line_match.group(1)
+                    macro_value = '\n'.join(lines).strip()
+                
+                # 特殊处理：如果宏值就是宏定义本身（没有值的宏），则设为空字符串
+                if macro_value == "#define " + macro_name:
+                    macro_value = ""
+        
+        
             macro_item = {
                 "macro": macro_name,
-                "content": content,
+                "content": macro_value,
                 "defined_in": defined_in,
                 "used_in": macro_uses.get(macro_name, [])
             }
