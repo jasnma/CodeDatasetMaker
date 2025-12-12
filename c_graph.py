@@ -229,12 +229,17 @@ def parse_file(file_path, struct_union_maps, args=None):
     
     # 标准化文件路径，移除工作目录前缀（如果存在）
     normalized_path = os.path.abspath(file_path)
-    project_root = os.path.abspath(args[0]) if args and len(args) > 0 and not args[0].startswith('-') else os.path.dirname(normalized_path)
+    # 从命令行参数中获取项目根目录
+    project_root = os.path.abspath(args[0]) if args and len(args) > 0 and not args[0].startswith('-') else os.getcwd()
     try:
+        # 计算文件相对于项目根目录的路径
         relative_path = os.path.relpath(normalized_path, project_root)
     except ValueError:
         # 处理跨驱动器的情况（Windows）
         relative_path = normalized_path
+        
+    # 更新file_info中的文件路径为相对于项目根目录的路径
+    file_info["file"] = relative_path
 
     # 存储结构体字段信息
     struct_fields = {}
@@ -504,7 +509,49 @@ def parse_file(file_path, struct_union_maps, args=None):
         elif node.kind == clang.cindex.CursorKind.INCLUSION_DIRECTIVE:
             include_name = node.spelling
             if include_name and include_name not in file_info["includes"]:
-                file_info["includes"].append(include_name)
+                # 尝试将包含文件路径转换为相对于项目根目录的路径
+                if node.location.file:
+                    include_file_path = os.path.abspath(node.location.file.name)
+                    include_dir = os.path.dirname(include_file_path)
+                    
+                    # 对于相对路径包含（""）尝试解析实际路径
+                    if not include_name.startswith('<') and not include_name.endswith('>'):
+                        # 根据当前文件的相对路径、include path逐个去匹配
+                        # 首先尝试在当前文件所在目录查找
+                        potential_path = os.path.join(include_dir, include_name)
+                        if os.path.exists(potential_path):
+                            try:
+                                relative_include_path = os.path.relpath(potential_path, project_root)
+                                file_info["includes"].append(relative_include_path)
+                            except ValueError:
+                                # 处理跨驱动器的情况（Windows）
+                                file_info["includes"].append(include_name)
+                        else:
+                            # 如果在当前文件目录找不到，尝试在项目包含路径中查找
+                            found = False
+                            # 遍历所有包含路径
+                            for include_path in [os.path.join(project_root, "include")] + project_include_paths:
+                                potential_path = os.path.join(include_path, include_name)
+                                if os.path.exists(potential_path):
+                                    try:
+                                        relative_include_path = os.path.relpath(potential_path, project_root)
+                                        file_info["includes"].append(relative_include_path)
+                                        found = True
+                                        break
+                                    except ValueError:
+                                        # 处理跨驱动器的情况（Windows）
+                                        file_info["includes"].append(include_name)
+                                        found = True
+                                        break
+                            
+                            # 如果在所有包含路径中都找不到，仍然使用原始名称
+                            if not found:
+                                file_info["includes"].append(include_name)
+                    else:
+                        # 对于系统包含（<>）直接添加
+                        file_info["includes"].append(include_name)
+                else:
+                    file_info["includes"].append(include_name)
         # 全局变量声明/定义
         elif node.kind == clang.cindex.CursorKind.VAR_DECL and not current_func:
             var_name = node.spelling
@@ -1179,8 +1226,11 @@ def save_file_info_json(file_infos, output_dir, project_name, project_dir):
     # 简化文件信息，只保留functions和includes字段
     simplified_file_infos = []
     for file_info in file_infos:
+        # file_info["file"] 已经是相对于项目根目录的路径了，直接使用
+        file_path = file_info["file"]
+            
         simplified_info = {
-            "file": file_info["file"],
+            "file": file_path,
             "functions": file_info["functions"],
             "includes": file_info["includes"]
         }
