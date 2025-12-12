@@ -5,6 +5,7 @@ void advanced_test_function();
 #include "utils.h"
 #include "core.h"
 #include "advanced_features.h"
+#include "../include/embedded_enum_test.h"
 
 // 全局变量定义
 int global_counter = 0;

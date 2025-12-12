@@ -34,7 +34,7 @@ def get_c_files(directory):
 def process_union(node, project_root):
     union_name = node.spelling
 
-    # 收集内嵌结构体与联合体信息
+    # 收集内嵌结构体、联合体和枚举信息
     embedded_childrens = {}
     # 收集联合体字段信息
     fields = []
@@ -52,6 +52,12 @@ def process_union(node, project_root):
             if struct_info:
                 field_type = {"struct": struct_info["fields"]}
                 embedded_childrens[embedded_struct_name] = field_type
+        elif (child.kind == clang.cindex.CursorKind.ENUM_DECL):
+            embedded_enum_name = child.get_usr()
+            enum_info = process_enum(child, project_root)
+            if enum_info:
+                field_type = {"enum": enum_info["values"]}
+                embedded_childrens[embedded_enum_name] = field_type
         elif child.kind == clang.cindex.CursorKind.FIELD_DECL:
             field_name = child.spelling
             field_type = child.type.spelling
@@ -90,7 +96,7 @@ def process_union(node, project_root):
 def process_struct(node, project_root):
     struct_name = node.spelling
     
-    # 收集内嵌结构体与联合体信息
+    # 收集内嵌结构体、联合体和枚举信息
     embedded_childrens = {}
     # 收集结构体字段信息
     fields = []
@@ -108,6 +114,12 @@ def process_struct(node, project_root):
             if struct_info:
                 field_type = {"struct": struct_info["fields"]}
                 embedded_childrens[embedded_struct_name] = field_type
+        elif (child.kind == clang.cindex.CursorKind.ENUM_DECL) and child.is_definition():
+            embedded_enum_name = child.get_usr()
+            enum_info = process_enum(child, project_root)
+            if enum_info:
+                field_type = {"enum": enum_info["values"]}
+                embedded_childrens[embedded_enum_name] = field_type
         elif (child.kind == clang.cindex.CursorKind.FIELD_DECL):
             field_name = child.spelling
             field_type = child.type.spelling
@@ -142,6 +154,46 @@ def process_struct(node, project_root):
     else:
         print(f"Warning: Skipping non-struct node: {node.spelling}")
 
+    return None
+
+def process_enum(node, project_root):
+    enum_name = node.spelling
+
+    # 收集枚举值信息
+    enum_values = []
+    for child in node.get_children():
+        if child.kind == clang.cindex.CursorKind.ENUM_CONSTANT_DECL:
+            constant_name = child.spelling
+            # 获取常量值（如果可获得）
+            constant_value = None
+            try:
+                # 尝试获取枚举常量的值
+                constant_value = child.enum_value
+            except:
+                pass
+            
+            if constant_name:
+                if constant_value is not None:
+                    enum_values.append({"name": constant_name, "value": constant_value})
+                else:
+                    enum_values.append({"name": constant_name})
+
+    if enum_name and enum_values:
+        # 获取枚举定义的实际位置
+        if node.location.file:
+            node_file_path = os.path.abspath(node.location.file.name)
+            try:
+                definition_location = os.path.relpath(node_file_path, project_root)
+            except ValueError:
+                definition_location = node_file_path
+
+        # 为枚举创建一个特殊的条目
+        return {
+            "enum": enum_name,
+            "values": enum_values,
+            "defined_in": definition_location
+        }
+    
     return None
 
 def print_ast(node, indent=0):
@@ -351,6 +403,39 @@ def parse_file(file_path, struct_union_maps, args=None):
                 struct_fields[union_name] = union_info
 
             # union 字节点已处理完毕，返回
+            return
+        # 枚举定义
+        elif node.kind == clang.cindex.CursorKind.ENUM_DECL and node.is_definition():
+            enum_info = None
+            enum_usr = node.get_usr()
+            if (enum_usr in struct_union_maps):
+                enum_info = struct_union_maps[enum_usr]
+                enum_name = enum_info["enum"]
+            else:
+                enum_info = process_enum(node, project_root)
+                struct_union_maps[enum_usr] = enum_info
+                enum_name = enum_info["enum"]
+            if not enum_info:
+                return
+
+            # 对于匿名枚举或Clang无法正确识别名称的枚举，尝试多种方法获取正确名称
+            if not enum_name or enum_name.startswith("enum (unnamed at"):
+                # 方法1: 使用parent_node的spelling
+                if (parent_node and parent_node.kind == clang.cindex.CursorKind.TYPEDEF_DECL):
+                    enum_name =  parent_node.spelling
+                else:
+                    return
+
+            enum_info["enum"] = enum_name
+            if enum_name and enum_info:
+                # 获取枚举定义的实际位置
+                if not enum_info["defined_in"]:
+                    enum_info["defined_in"] = relative_path
+                        
+                # 为枚举创建一个特殊的条目，与结构体和联合体分开
+                struct_fields[enum_name] = enum_info
+
+            # enum 字节点已处理完毕，返回
             return
         # 宏定义
         elif node.kind == clang.cindex.CursorKind.MACRO_DEFINITION:
@@ -1152,7 +1237,7 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
     # 转换结构体信息格式
     struct_list = []
     for struct_name, info in struct_fields.items():
-        # 检查是结构体还是联合体
+        # 检查是结构体、联合体还是枚举
         if "struct" in info:
             # 结构体
             struct_item = {
@@ -1166,6 +1251,14 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
             struct_item = {
                 "union": info["union"],
                 "fields": info["fields"],
+                "defined_in": info["defined_in"],
+                "used_by": struct_uses.get(struct_name, [])
+            }
+        elif "enum" in info:
+            # 枚举
+            struct_item = {
+                "enum": info["enum"],
+                "values": info["values"],
                 "defined_in": info["defined_in"],
                 "used_by": struct_uses.get(struct_name, [])
             }
