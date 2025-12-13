@@ -348,13 +348,14 @@ def parse_file(file_path, struct_union_maps, args=None):
             called_func_cursor = node.referenced
             if called_func_cursor and called_func_cursor.kind == clang.cindex.CursorKind.FUNCTION_DECL:
                 called_func_name = called_func_cursor.spelling
-                # 记录调用关系
-                if called_func_name:
+                # 记录调用关系，避免重复记录
+                if called_func_name and called_func_name not in call_graph[current_func]:
                     call_graph[current_func].append(called_func_name)
             else:
                 # 如果无法通过referenced获取，尝试使用node.spelling
                 called_func_name = node.spelling
-                if called_func_name:
+                # 记录调用关系，避免重复记录
+                if called_func_name and called_func_name not in call_graph[current_func]:
                     call_graph[current_func].append(called_func_name)
         # 结构体定义
         elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.is_definition():
