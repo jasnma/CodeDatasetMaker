@@ -1449,6 +1449,7 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
                     break
         
         # 如果不是 Clang 内置宏，则添加到列表中
+        params = ""
         macro_value = ""
         if not is_clang_builtin:
             # 提取宏定义的值，去除定义名字部分
@@ -1456,9 +1457,15 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
                 # 使用正则表达式提取宏定义的值，去除定义名字部分
                 # 匹配 #define MACRO_NAME VALUE 或 #define MACRO_NAME(VALUE) VALUE 这样的模式
                 # 首先尝试匹配带参数的宏定义
-                match = re.match(r'^\s*#\s*define\s+' + re.escape(macro_name) + r'\s*\([^)]*\)\s*(.*)$', content, re.DOTALL)
+                pattern = (
+                    r'^\s*#\s*define\s+'
+                    + re.escape(macro_name) +
+                    r'(\([^)\n]*\))\s*(.*)$'
+                )
+                match = re.match(pattern, content, re.DOTALL)
                 if match:
-                    macro_value = match.group(1).strip()
+                    params = match.group(1).strip()
+                    macro_value = match.group(2).strip()
                 else:
                     # 然后尝试匹配不带参数的宏定义
                     match = re.match(r'^\s*#\s*define\s+' + re.escape(macro_name) + r'\s*(.*)$', content, re.DOTALL)
@@ -1503,7 +1510,7 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
         
         
             macro_item = {
-                "macro": macro_name,
+                "macro": macro_name + params,
                 "content": macro_value,
                 "defined_in": defined_in,
                 "used_in": macro_uses.get(macro_name, [])
