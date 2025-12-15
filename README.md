@@ -1,127 +1,100 @@
-# Code Dataset Maker
+# CodeDatasetMaker
 
-这个工具集可以帮助你分析C语言项目，提取函数调用关系、结构体、宏定义等信息，并生成项目文件树。
+CodeDatasetMaker 是一个用于分析C/C++项目的工具，它可以生成项目的函数调用图、结构体信息、宏定义信息等。
 
 ## 功能特性
 
-1. **函数调用图生成** - 分析C项目中的函数调用关系
-2. **代码元素提取** - 提取函数、结构体、宏定义等信息
-3. **项目文件树生成** - 生成项目文件结构树，可忽略不必要的文件
+- 生成项目的函数调用图
+- 提取项目中的结构体、联合体和枚举信息
+- 提取宏定义和全局变量信息
+- 生成项目文件树
+- 支持Keil和Eclipse CDT项目文件解析
 
-## 依赖安装
+## 安装依赖
+
+在运行此工具之前，请确保安装了以下依赖：
 
 ```bash
-pip install clang libclang anytree
+pip install clang anytree lxml
 ```
 
-在macOS上，你可能还需要安装LLVM：
+你还需要安装 LLVM/Clang 库。在 macOS 上，你可以使用 Homebrew 安装：
 
 ```bash
 brew install llvm
 ```
 
+在 Ubuntu 上，你可以使用 apt 安装：
+
+```bash
+sudo apt-get install llvm-dev libclang-dev
+```
+
 ## 使用方法
 
-### 1. 函数调用图生成
+### 生成代码分析数据（默认模式）
 
 ```bash
-python3 c_graph.py <project_directory>
+python3 main.py <项目路径>
 ```
 
-这将生成以下文件：
-- `output/<project_name>/call_graph.json` - 函数调用关系JSON
-- `output/<project_name>/file_info.json` - 文件信息（函数、结构体、宏定义等）
-- `output/<project_name>/global_project_text_tree.txt` - 文本格式的调用树
-
-### 2. 项目文件树生成
+例如：
 
 ```bash
-# 基本用法（默认会输出到 output/<project_name>/file_tree.txt）
-python3 generate_file_tree.py <project_directory>
-
-# 保存为指定的JSON文件名
-python3 generate_file_tree.py <project_directory> -o <output_file_name>
-
-# 限制树的深度
-python3 generate_file_tree.py <project_directory> -d <max_depth>
+python3 main.py test_project
 ```
 
-所有输出文件都会自动保存在 `output/<project_name>/` 目录中。如果不指定输出文件名，将默认保存为 `file_tree.txt`（文本格式）。如果需要JSON格式，可以使用 `-o file_tree.json` 参数。
+### 模块分割分析
 
-## 输出格式说明
-
-### 函数调用图 (call_graph.json)
-
-```json
-{
-  "src/main.c:main": [
-    "src/helper.c:function1",
-    "src/helper.c:function2"
-  ],
-  "src/helper.c:function1": [
-    "src/utils.c:utility_function"
-  ]
-}
-```
-
-### 文件信息 (file_info.json)
-
-```json
-[
-  {
-    "file": "motor.c",
-    "functions": [
-      "motor_init",
-      "motor_start"
-    ],
-    "structs": [
-      "MotorState",
-      "PIDController"
-    ],
-    "macros": [
-      "MOTOR_MAX_SPEED",
-      "MOTOR_MIN_SPEED"
-    ],
-    "includes": [
-      "motor.h",
-      "bldc_ctrl.h"
-    ]
-  }
-]
-```
-
-### 项目文件树 (JSON格式)
-
-```json
-[
-  {
-    "name": "src",
-    "type": "directory",
-    "children": [
-      {
-        "name": "main.c",
-        "type": "file"
-      }
-    ]
-  }
-]
-```
-
-## 忽略的文件类型
-
-以下文件和目录会被自动忽略：
-- 编译产物：`.o`, `.obj`, `.exe`, `.dll`, `.so`, `.dylib`
-- Python字节码：`.pyc`, `.pyo`, `.pyd`
-- 日志和临时文件：`.log`, `.tmp`, `.temp`
-- 系统文件：`.gitignore`, `.DS_Store`, `Thumbs.db`
-- 特殊目录：`.git`, `__pycache__`, `.vscode`, `.idea`
-- 构建目录：`node_modules`, `build`, `dist`
-- 环境文件：`.env`, `.venv`, `venv`, `env`
-
-## 示例
-
-分析一个C项目：
+在生成代码分析数据后，可以使用模块分割工具分析项目的模块边界：
 
 ```bash
-python3 c_graph.py ./test_project
-python3 generate_file_tree.py ./test_project -o project_tree.json
+python3 main.py --mode split <项目路径>
+```
+
+例如：
+
+```bash
+python3 main.py --mode split test_project
+```
+
+### 直接运行脚本
+
+你也可以直接运行 `codedatasetmaker` 目录下的脚本：
+
+```bash
+cd codedatasetmaker
+python3 c_graph.py <项目路径>
+python3 module_splitter.py <项目路径>
+```
+
+## 输出文件
+
+工具运行后会在 `output/<项目名>` 目录下生成以下文件：
+
+- `call_graph.json`: 函数调用图
+- `call_text_tree.txt`: 函数调用树的文本表示
+- `file_info.json`: 文件信息，包括函数列表和包含的头文件
+- `project_tree.txt`: 项目文件树
+- `struct_info.json`: 结构体、联合体和枚举信息
+- `macro_info.json`: 宏定义信息
+- `global_var_info.json`: 全局变量信息
+
+## 项目结构
+
+```
+codedatasetmaker/
+├── c_graph.py          # 主要的分析脚本
+├── generate_file_tree.py # 生成文件树的脚本
+├── module_splitter.py   # 模块分割脚本
+└── __init__.py         # Python 包初始化文件
+
+main.py                 # 主入口脚本
+README.md               # 说明文档
+```
+
+## 注意事项
+
+1. 确保你的系统上安装了 LLVM/Clang 库，并且路径配置正确。
+2. 对于大型项目，分析过程可能需要一些时间。
+3. 工具会自动检测 Keil 和 Eclipse CDT 项目文件中的包含路径和预处理器宏定义。

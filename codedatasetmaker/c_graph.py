@@ -9,6 +9,7 @@ import clang.cindex
 from anytree import Node, RenderTree
 import xml.etree.ElementTree as ET
 from collections import defaultdict
+from . import generate_file_tree
 
 # 确保 libclang 已正确配置
 try:
@@ -586,7 +587,7 @@ def parse_file(file_path, struct_union_maps, args=None):
                             # 如果在当前文件目录找不到，尝试在项目包含路径中查找
                             found = False
                             # 遍历所有包含路径
-                            for include_path in [os.path.join(project_root, "include")] + project_include_paths:
+                            for include_path in [os.path.join(project_root, "include")] + args[1:]:  # 使用args中的包含路径
                                 potential_path = os.path.join(include_path, include_name)
                                 if os.path.exists(potential_path):
                                     try:
@@ -1304,34 +1305,13 @@ def save_file_info_json(file_infos, output_dir, project_name, project_dir):
 
 def generate_project_tree(project_dir, output_dir):
     """生成项目文件树"""
-    def walk_directory(directory, prefix=""):
-        entries = os.listdir(directory)
-        entries.sort()
-        tree_lines = []
-        
-        for i, entry in enumerate(entries):
-            path = os.path.join(directory, entry)
-            is_last = i == len(entries) - 1
-            connector = "└── " if is_last else "├── "
-            
-            if os.path.isdir(path):
-                tree_lines.append(f"{prefix}{connector}{entry}/")
-                extension = "    " if is_last else "│   "
-                tree_lines.extend(walk_directory(path, prefix + extension))
-            else:
-                tree_lines.append(f"{prefix}{connector}{entry}")
-        
-        return tree_lines
-    
-    # 生成文件树文本
-    tree_lines = [os.path.basename(project_dir) + "/"]
-    tree_lines.extend(walk_directory(project_dir))
-    
-    # 保存文件树到文件
+    # 生成文件树
+    file_tree = generate_file_tree.generate_file_tree(project_dir)
+
+    # 保存文件树到文本文件
     file_name = os.path.join(output_dir, "project_tree.txt")
-    with open(file_name, "w") as f:
-        f.write("\n".join(tree_lines))
-    
+    generate_file_tree.save_to_text(file_tree, file_name)
+
     print(f"Project tree saved to {file_name}")
 
 def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
@@ -1538,10 +1518,13 @@ def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, proj
         json.dump(global_var_list, f, indent=2)
     print(f"Global variable info saved to {file_name}")
 
-if __name__ == "__main__":
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
+        
     parser = argparse.ArgumentParser(description='Generate function call graph for C project')
     parser.add_argument('project_dir', help='Path to the C project directory')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     project_dir = args.project_dir
     # 获取项目目录名
