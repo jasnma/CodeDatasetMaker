@@ -1,6 +1,6 @@
-#include "../include/advanced_features.h"
-#include "../include/utils.h"
-#include "../include/core.h"
+#include "advanced_features.h"
+#include "utils.h"
+#include "core.h"
 #include <stdio.h>
 
 // 使用宏定义
