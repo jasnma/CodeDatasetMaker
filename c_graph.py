@@ -488,16 +488,13 @@ def parse_file(file_path, struct_union_maps, args=None):
                                 line = lines[line_num].rstrip().rstrip('\\').rstrip()
                                 macro_lines = [line]
                                 # 检查是否是多行宏定义（以\结尾）
-                                j = line_num + 1
-                                if j < len(lines) and lines[j].rstrip().endswith('\\'):
-                                    while j < len(lines) and lines[j].rstrip().endswith('\\'):
-                                        line = lines[j].rstrip()
+                                j = line_num
+                                while j < len(lines) and lines[j].rstrip().endswith('\\'):
+                                    if j + 1 < len(lines):
+                                        line = lines[j + 1].rstrip()
                                         line = line.rstrip('\\').rstrip()
                                         macro_lines.append(line)
                                         j += 1
-                                    # 添加最后一行（不以\结尾的行）
-                                    if j < len(lines) and lines[j].strip():
-                                        macro_lines.append(lines[j].rstrip())
                                 
                                 # 重新构造宏定义内容
                                 macro_content = '\n'.join(macro_lines)
