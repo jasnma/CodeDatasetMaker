@@ -10,6 +10,14 @@ from anytree import Node, RenderTree
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from . import generate_file_tree
+from dataclasses import dataclass
+
+@dataclass
+class GlobalVarInfo:
+    name: str
+    type: str
+    file: str
+    is_definition: bool
 
 # 确保 libclang 已正确配置
 try:
@@ -249,7 +257,7 @@ def parse_file(file_path, struct_union_maps, args=None):
     struct_uses = defaultdict(list)  # 结构体名 -> [(文件路径:函数名), ...]
     
     # 存储全局变量定义和使用信息
-    global_var_defs = {}  # 变量名 -> (类型, 文件路径)
+    global_var_defs: dict[str, GlobalVarInfo] = {}  # 变量名 -> GlobalVarInfo
     global_var_uses = defaultdict(list)  # 变量名 -> [(文件路径:函数名), ...]
     
     # 存储宏定义和使用信息
@@ -613,38 +621,22 @@ def parse_file(file_path, struct_union_maps, args=None):
         elif node.kind == clang.cindex.CursorKind.VAR_DECL and not current_func:
             var_name = node.spelling
             var_type = node.type.spelling
+
+            def is_var_definition(node):
+                # extern 修饰的一定不是定义（除非你要处理 extern + initializer 的极端情况）
+                if node.storage_class == clang.cindex.StorageClass.EXTERN:
+                    return False
+
+                # 其余情况全部是定义（包括 int g; 这种）
+                return True
+
             if var_name:
-                # 检查这是否是一个定义（有初始化值）而不仅仅是一个声明
-                is_definition = False
-                for child in node.get_children():
-                    # 如果变量有初始化子节点，则说明是定义而非声明
-                    if child.kind in [clang.cindex.CursorKind.INTEGER_LITERAL, 
-                                      clang.cindex.CursorKind.STRING_LITERAL,
-                                      clang.cindex.CursorKind.INIT_LIST_EXPR,
-                                      clang.cindex.CursorKind.UNEXPOSED_EXPR]:
-                        is_definition = True
-                        break
-                
-                # 如果没有明确的初始化，检查是否有赋值操作
-                if not is_definition:
-                    # 检查节点是否包含'='符号，这表明它是定义
-                    try:
-                        if node.location.file:
-                            var_file_path = os.path.abspath(node.location.file.name)
-                            with open(var_file_path, 'r', encoding='utf-8') as f:
-                                lines = f.readlines()
-                                line_num = node.location.line - 1
-                                if line_num < len(lines):
-                                    line_content = lines[line_num]
-                                    # 检查行中是否包含'='且不在字符串或注释中
-                                    if '=' in line_content and not line_content.strip().startswith('//'):
-                                        is_definition = True
-                    except:
-                        pass
+                # 检查这是否是一个定义而不仅仅是一个声明
+                is_definition = is_var_definition(node)
                 
                 # 获取变量定义/声明的实际位置
                 definition_location = relative_path
-                if node.location.file:
+                if not is_definition and node.location.file:
                     node_file_path = os.path.abspath(node.location.file.name)
                     try:
                         definition_location = os.path.relpath(node_file_path, project_root)
@@ -653,20 +645,23 @@ def parse_file(file_path, struct_union_maps, args=None):
                 
                 # 对于已经存在的全局变量，优先保留定义而非声明
                 if var_name in global_var_defs:
-                    existing_type, existing_path = global_var_defs[var_name]
                     # 如果当前节点是定义（无论现有记录是什么），都应该更新为当前位置
                     # 因为我们现在遇到了实际的定义
                     if is_definition:
-                        global_var_defs[var_name] = (var_type, definition_location)
-                    # 如果当前节点是声明，而现有记录也是声明，则保持现有记录不变
-                    # （这样可以确保保留第一个遇到的声明位置）
-                    elif not is_definition and not existing_path.endswith(('.c', '.cpp', '.cc')):
-                        # 现有记录不是源文件中的定义，保持现有记录不变
-                        pass
-                    # 其他情况（当前是声明，现有是定义）保持现有定义不变
+                        global_var_defs[var_name] = GlobalVarInfo(
+                                name = var_name,
+                                type = var_type,
+                                file = definition_location,
+                                is_definition = is_definition,
+                            )
                 else:
                     # 新的全局变量
-                    global_var_defs[var_name] = (var_type, definition_location)
+                    global_var_defs[var_name] = GlobalVarInfo(
+                            name = var_name,
+                            type = var_type,
+                            file = definition_location,
+                            is_definition = is_definition,
+                        )
         # 变量引用（在函数内部）
         elif node.kind == clang.cindex.CursorKind.DECL_REF_EXPR and current_func:
             # 检查是否引用了全局变量或结构体
@@ -1505,11 +1500,11 @@ def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, proj
     
     # 转换全局变量信息格式
     global_var_list = []
-    for var_name, (var_type, defined_in) in global_var_defs.items():
+    for var_name, define_info in global_var_defs.items():
         var_item = {
             "var": var_name,
-            "type": var_type,
-            "defined_in": defined_in,
+            "type": define_info.type,
+            "defined_in": define_info.file,
             "used_in": global_var_uses.get(var_name, [])
         }
         global_var_list.append(var_item)
@@ -1552,7 +1547,7 @@ def main(argv=None):
     file_infos = []  # 存储所有文件的信息
     all_struct_fields = {}  # 存储所有结构体字段信息
     all_struct_uses = defaultdict(list)  # 存储所有结构体使用信息
-    all_global_var_defs = {}  # 存储所有全局变量定义
+    all_global_var_defs: dict[str, GlobalVarInfo] = {}  # 存储所有全局变量定义
     all_global_var_uses = defaultdict(list)  # 存储所有全局变量使用
     all_macro_defs = {}  # 存储所有宏定义
     all_macro_uses = defaultdict(list)  # 存储所有宏使用信息
@@ -1597,9 +1592,11 @@ def main(argv=None):
             for use in uses:
                 if use not in all_struct_uses[struct_name]:
                     all_struct_uses[struct_name].append(use)
-        
+
         # 合并全局变量定义
-        all_global_var_defs.update(global_var_defs)
+        for var_name, def_info in global_var_defs.items():
+            if def_info.is_definition:
+                all_global_var_defs[var_name] = def_info
         
         # 合并全局变量使用信息
         for var_name, uses in global_var_uses.items():
