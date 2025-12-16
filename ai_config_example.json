@@ -1,0 +1,10 @@
+{
+  "api_key": "your_private_api_key_here",
+  "base_url": "http://localhost:8000/v1",
+  "model": "gpt-3.5-turbo",
+  "temperature": 0.7,
+  "max_tokens": 2000,
+  "top_p": 1.0,
+  "frequency_penalty": 0.0,
+  "presence_penalty": 0.0
+}

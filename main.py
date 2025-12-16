@@ -34,11 +34,33 @@ def split_modules(project_dir, args):
         # 恢复原始的sys.argv
         sys.argv = original_argv
 
+
+def generate_module_docs(project_dir, args):
+    """运行模块文档生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_module_docs模块
+    from codedatasetmaker import generate_module_docs
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_module_docs.py', project_dir] + args
+    
+    try:
+        # 运行模块文档生成功能
+        generate_module_docs.main()
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'split'], default='analyze',
-                        help='运行模式: analyze(代码分析) 或 split(模块分割) (默认: analyze)')
+    parser.add_argument('--mode', choices=['analyze', 'split', 'doc'], default='analyze',
+                        help='运行模式: analyze(代码分析)、split(模块分割) 或 doc(生成模块文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -57,6 +79,12 @@ def main():
         if args.output:
             split_args.extend(['--output', args.output])
         split_modules(args.project_dir, split_args)
+    elif args.mode == 'doc':
+        # 将未知参数传递给模块文档生成功能
+        doc_args = unknown_args[:]
+        if args.output:
+            doc_args.extend(['--output', args.output])
+        generate_module_docs(args.project_dir, doc_args)
 
 if __name__ == "__main__":
     main()

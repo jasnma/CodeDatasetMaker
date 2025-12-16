@@ -1,4 +1,4 @@
-#include "../include/core.h"
+#include "core.h"
 
 int core_math_add(int a, int b) {
     return a + b;

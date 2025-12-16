@@ -1,4 +1,4 @@
-#include "../include/core.h"
+#include "core.h"
 
 void core_utils_init() {
     // 初始化核心工具

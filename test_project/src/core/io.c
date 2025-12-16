@@ -1,4 +1,4 @@
-#include "../include/core.h"
+#include "core.h"
 
 int read_data() {
     return 42;
