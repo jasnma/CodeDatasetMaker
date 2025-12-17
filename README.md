@@ -80,24 +80,6 @@ python3 codedatasetmaker/generate_module_docs.py <项目路径>
 
 这将在 `output/<项目名>/modules/` 目录下生成每个模块的文档提示词文件，这些文件包含了模块的源代码和元数据信息，可以提供给AI生成详细的模块文档。
 
-提供了以下脚本用于调用AI API：
-
-1. `example_ai_call.py` 脚本作为示例，展示如何使用AI配置文件和生成的提示词调用AI API：
-
-```bash
-python3 example_ai_call.py output/test_project/modules/helper_prompt.txt
-```
-
-2. `call_ai_api.py` 是一个实际可用的脚本，支持私有化部署的OpenAI兼容模型：
-
-```bash
-python3 call_ai_api.py output/test_project/modules/helper_prompt.txt
-```
-
-该脚本会读取 `ai_config.json` 配置文件中的参数，包括 `base_url`（用于私有化部署的API端点）、`api_key`、`model` 等，并调用AI API生成模块文档。
-
-要使用私有化部署的模型，请修改 `ai_config.json` 中的 `base_url` 参数。例如，如果您的私有化模型部署在 `http://localhost:8000`，则应将 `base_url` 设置为 `http://localhost:8000/v1`。请参考 `ai_config_example.json` 文件了解更多配置示例。
-
 ### 直接运行脚本
 
 你也可以直接运行 `codedatasetmaker` 目录下的脚本：
@@ -137,8 +119,6 @@ codedatasetmaker/
 
 main.py                 # 主入口脚本
 ai_config.json          # AI访问配置文件
-example_ai_call.py      # AI调用示例脚本
-call_ai_api.py          # 实际可用的AI调用脚本
 README.md               # 说明文档
 ```
 

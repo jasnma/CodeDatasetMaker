@@ -7,8 +7,9 @@
 import json
 import os
 import argparse
-import requests
 from collections import defaultdict, deque
+from openai import OpenAI
+from openai import APIError, APIConnectionError, RateLimitError
 
 
 def load_json_file(file_path):
@@ -127,7 +128,7 @@ def load_ai_config(config_path="ai_config.json"):
 
 
 def call_ai_api(prompt, config):
-    """调用AI API"""
+    """使用OpenAI SDK调用AI API并流式输出响应"""
     # 获取配置参数
     api_key = config.get("api_key")
     base_url = config.get("base_url", "https://api.openai.com/v1")
@@ -143,33 +144,49 @@ def call_ai_api(prompt, config):
         print("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
         return None
     
-    # 构造请求
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
+    # 创建OpenAI客户端
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url
+    )
     
-    data = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "top_p": top_p,
-        "frequency_penalty": frequency_penalty,
-        "presence_penalty": presence_penalty
-    }
+    # 构造消息
+    messages = [{"role": "user", "content": prompt}]
     
-    # 发送请求
+    # 发送请求并流式输出响应
     try:
-        response = requests.post(
-            f"{base_url}/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=300  # 5分钟超时
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            stream=True  # 启用流式响应
         )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
+        
+        # 流式输出响应
+        full_response = ""
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                content = chunk.choices[0].delta.content
+                print(content, end="", flush=True)  # 实时输出到控制台
+                full_response += content
+        
+        print()  # 添加换行
+        return {"choices": [{"message": {"content": full_response}}]}
+        
+    except RateLimitError as e:
+        print(f"错误: 请求频率过高 {e}")
+        return None
+    except APIConnectionError as e:
+        print(f"错误: API连接失败 {e}")
+        return None
+    except APIError as e:
+        print(f"错误: API返回错误 {e}")
+        return None
+    except Exception as e:
         print(f"错误: API请求失败: {e}")
         return None
 
@@ -320,7 +337,8 @@ def main():
             generate_module_doc(module_name, module_structure, global_var_info, args.project_path, output_dir, ai_config)
         except Exception as e:
             print(f"处理模块 '{module_name}' 时出错: {e}")
-
+        # TODO(hai.chenh): 测试用，让生成只跑一个模块
+        break
 
 if __name__ == "__main__":
     main()
