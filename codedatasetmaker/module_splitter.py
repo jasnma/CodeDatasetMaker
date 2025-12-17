@@ -130,32 +130,32 @@ def analyze_module_boundaries(source_dir):
     """分析模块边界"""
     # 构建metadata目录路径
     metadata_dir = os.path.join('output', os.path.basename(source_dir))
-    
+
     # 构建文件路径
     call_graph_path = os.path.join(metadata_dir, 'call_graph.json')
     file_info_path = os.path.join(metadata_dir, 'file_info.json')
-    
+
     # 检查metadata目录是否存在
     if not os.path.exists(metadata_dir):
         print(f"错误: 找不到metadata目录 {metadata_dir}")
         sys.exit(1)
-        
+
     # 检查文件是否存在
     if not os.path.exists(call_graph_path):
         print(f"错误: 在目录 {metadata_dir} 中找不到 call_graph.json")
         sys.exit(1)
-        
+
     if not os.path.exists(file_info_path):
         print(f"错误: 在目录 {metadata_dir} 中找不到 file_info.json")
         sys.exit(1)
-    
+
     # 加载JSON文件
     call_graph = load_json_file(call_graph_path)
     file_info = load_json_file(file_info_path)
-    
+
     # 构建文件调用图映射
     file_call_map = defaultdict(set)
-    
+
     # 构建文件间的调用关系
     for caller, callees in call_graph.items():
         caller_parts = caller.split(':')
@@ -167,60 +167,80 @@ def analyze_module_boundaries(source_dir):
                     callee_file = callee_parts[0]
                     if caller_file != callee_file:
                         file_call_map[caller_file].add(callee_file)
-    
+
     # 按目录组织文件
     dir_files = defaultdict(list)
     file_details = {}
-    main_file = None
     init_files = []  # 存储包含初始化函数的文件
+
+    # 声明变量，保存已经加入模块的文件
+    added_files = set()
     
     # 将所有文件按目录分类，同时查找main函数和初始化函数所在的文件
     for file_data in file_info:
-        directory = get_directory(file_data['file'])
-        file_details[file_data['file']] = file_data
-        
-        # 检查是否有main函数
-        has_main = any(func['name'] == 'main' for func in file_data.get('functions', []))
-        if has_main:
-            main_file = file_data['file']
-            # main文件单独作为一个模块，不参与目录分组
-            continue
-            
-        # 检查是否有初始化函数 (init, config, setup等)
-        init_function_names = ['init', 'initialize', 'config', 'configure', 'setup', 'start', 'begin']
+        file_path = file_data['file']
+        directory = get_directory(file_path)
+        file_details[file_path] = file_data
+
+        # 检查是否有初始化函数 (main, init, config, setup等)
+        init_function_names = ['main', 'init', 'initialize', 'config', 'configure', 'setup', 'start', 'begin']
         has_init_func = any(any(func['name'].lower().endswith(init_name) or 
                                func['name'].lower().startswith(init_name) or
                                init_name in func['name'].lower()
                                for init_name in init_function_names)
                            for func in file_data.get('functions', []))
-        
+
         if has_init_func:
-            init_files.append(file_data['file'])
-            # 包含初始化函数的文件单独作为一个模块，不参与目录分组
+            init_files.append(file_path)
+            added_files.add(file_path)
             continue
-            
-        dir_files[directory].append(file_data['file'])
+
+        dir_files[directory].append(file_path)
     
     # 分析结果存储
     modules = defaultdict(list)
     dependencies = defaultdict(set)
     module_counter = 0
     
+    # 处理包含初始化函数的文件，并把它调用的同目录文件加入模块
+    for init_file in init_files:
+        # 使用文件名作为模块名
+        file_name = os.path.basename(init_file)
+        init_module_name = os.path.splitext(file_name)[0]
+        
+        # 初始化文件作为模块入口
+        modules[init_module_name].append(init_file)
+        added_files.add(init_file)
+
+        # 分析初始化文件的依赖关系
+        if init_file in file_call_map:
+            directory = get_directory(init_file)
+            for called_file in file_call_map[init_file]:
+                # 如果文件在同一个目录，且没有初始化入口则加入当前模块
+                if directory == get_directory(called_file) and called_file not in added_files:
+                    modules[init_module_name].append(called_file)
+                    added_files.add(called_file)
+
     # 对每个目录中的文件进行模块划分
     for directory, files in dir_files.items():
         # 构建该目录中文件的调用关系图
         local_file_calls = defaultdict(set)
         for file in files:
+            if file in added_files:
+                continue
+
             if file in file_call_map:
                 # 只考虑同一目录内的调用关系
                 for called_file in file_call_map[file]:
                     if called_file in files:
                         local_file_calls[file].add(called_file)
                         local_file_calls[called_file].add(file)  # 添加反向连接
-        
+            else:
+                print(f"Warning: File '{file}' not found in file_call_map.")
+
         # 查找该目录中的连通分量（模块），考虑文件大小限制
         file_components = find_connected_components_with_size_limit(files, local_file_calls, file_details, source_dir)
-        
+
         # 为每个连通分量创建一个模块
         for i, component in enumerate(file_components):
             # 根据组件大小确定模块名称
@@ -269,41 +289,21 @@ def analyze_module_boundaries(source_dir):
                                         dependencies[module_name].add(other_module)
                                         break
     
-    # 处理main文件，确保它作为一个独立的模块
-    if main_file:
-        # main文件单独作为一个模块
-        main_module_name = "main"
-        modules[main_module_name].append(main_file)
-        
-        # 分析main模块的依赖关系
-        if main_file in file_call_map:
-            for called_file in file_call_map[main_file]:
+    # 遍历所有模块，确定他们的依赖关系
+    for module_name, module_files in modules.items():
+        for file in module_files:
+            if file in file_call_map:
+                called_files = file_call_map[file]
                 # 找到被调用文件所属的模块
-                for module_name, module_files in modules.items():
-                    if module_name != main_module_name:
-                        if called_file in module_files:
-                            dependencies[main_module_name].add(module_name)
-                            break
-    
-    # 处理包含初始化函数的文件，确保它们作为独立的模块
-    for init_file in init_files:
-        # 使用文件名作为模块名
-        file_name = os.path.basename(init_file)
-        init_module_name = os.path.splitext(file_name)[0]
-        
-        # 初始化文件单独作为一个模块
-        modules[init_module_name].append(init_file)
-        
-        # 分析初始化模块的依赖关系
-        if init_file in file_call_map:
-            for called_file in file_call_map[init_file]:
-                # 找到被调用文件所属的模块
-                for module_name, module_files in modules.items():
-                    if module_name != init_module_name:
-                        if called_file in module_files:
-                            dependencies[init_module_name].add(module_name)
-                            break
-    
+                for dependencies_module_name, dependencies_module_files in modules.items():
+                    if dependencies_module_name == module_name:
+                        continue
+
+                    has_common = any(x in called_files for x in dependencies_module_files)
+                    if has_common:
+                        dependencies[module_name].add(dependencies_module_name)
+                    
+
     # 补充在file_info.json中存在但在调用图中未出现的文件
     all_files_in_info = set()
     for file_data in file_info:
@@ -316,7 +316,7 @@ def analyze_module_boundaries(source_dir):
             if file_data['file'] in module_files:
                 found = True
                 break
-                
+
         if not found:
             # 添加未在调用图中出现的文件到相应目录的模块中
             # 找到该目录的第一个模块，或者创建一个新模块
@@ -332,7 +332,7 @@ def analyze_module_boundaries(source_dir):
                 module_counter += 1
                 module_name = f"{os.path.basename(directory) if directory else 'root'}_module_{module_counter}"
                 modules[module_name].append(file_data['file'])
-    
+
     return modules, dependencies
 
 
