@@ -200,6 +200,8 @@ def save_ai_response(response, output_path):
         # 保存AI生成的文档
         if "choices" in response and len(response["choices"]) > 0:
             content = response["choices"][0]["message"]["content"]
+            # 去除头部的不可见字符，包括BOM和其他Unicode空白字符
+            content = content.strip("\u200B-\u200D\uFEFF\u2060")
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return True
@@ -213,11 +215,65 @@ def save_ai_response(response, output_path):
         return False
 
 
+def extract_duties_and_boundaries(doc_content):
+    """从文档内容中提取'职责与边界'部分"""
+    import re
+    
+    # 查找"职责与边界"部分
+    pattern = r"### 职责与边界\s*(.*?)(?=\n### |\Z)"
+    match = re.search(pattern, doc_content, re.DOTALL)
+    
+    if match:
+        duties_and_boundaries = match.group(1).strip()
+        return duties_and_boundaries
+    else:
+        return None
+
+
+def extract_duties_and_boundaries_from_file(file_path):
+    """从文件中提取'职责与边界'部分"""
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            doc_content = f.read()
+        return extract_duties_and_boundaries(doc_content)
+    except FileNotFoundError:
+        print(f"文件未找到: {file_path}")
+        return None
+    except Exception as e:
+        print(f"读取文件时出错: {e}")
+        return None
+
+
+def extract_duties_and_boundaries_for_module(output_dir, module_name):
+    module_output_dir = os.path.join(output_dir, "modules")
+    module_doc_file = os.path.join(module_output_dir, f"{module_name}_doc.md")
+
+    return extract_duties_and_boundaries_from_file(module_doc_file)
+
+
+def extract_dependencies_doc(output_dir, dependencies):
+    dependencies_doc = ""
+
+    for dependency in dependencies:
+        dependency_doc = extract_duties_and_boundaries_for_module(output_dir, dependency)
+        if dependency_doc:
+            dependencies_doc += f"\n// === {dependency}的功能 ===\n"
+            dependencies_doc += dependency_doc
+            dependencies_doc += "\n"
+
+    if not dependencies_doc:
+        dependencies_doc = "无"
+
+    return dependencies_doc
+
+
 def generate_module_doc(module_name, module_structure, global_var_info, project_path, output_dir, ai_config=None):
     """生成单个模块的文档"""
     # 获取模块信息
     module_info = module_structure[module_name]
     dependencies = module_info.get("dependencies", [])
+
+    dependencies_doc = extract_dependencies_doc(output_dir, dependencies)
     
     # 获取反向依赖
     _, reverse_dependencies = get_module_dependencies(module_structure)
@@ -261,7 +317,8 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     prompt = prompt_template.format(
         module_name=module_name,
         source_code=source_code,
-        metadata=json.dumps(metadata, indent=2, ensure_ascii=False)
+        metadata=json.dumps(metadata, indent=2, ensure_ascii=False),
+        dependencies_description=dependencies_doc
     )
     
     # 创建输出目录
@@ -338,7 +395,7 @@ def main():
         except Exception as e:
             print(f"处理模块 '{module_name}' 时出错: {e}")
         # TODO(hai.chenh): 测试用，让生成只跑一个模块
-        break
+        # break
 
 if __name__ == "__main__":
     main()
