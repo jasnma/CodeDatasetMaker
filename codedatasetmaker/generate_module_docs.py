@@ -394,8 +394,6 @@ def main():
             generate_module_doc(module_name, module_structure, global_var_info, args.project_path, output_dir, ai_config)
         except Exception as e:
             print(f"处理模块 '{module_name}' 时出错: {e}")
-        # TODO(hai.chenh): 测试用，让生成只跑一个模块
-        # break
 
 if __name__ == "__main__":
     main()
