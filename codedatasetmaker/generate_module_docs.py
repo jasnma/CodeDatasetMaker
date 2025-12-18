@@ -281,7 +281,7 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
         response = call_ai_api(prompt, ai_config)
         if response:
             # 保存AI生成的文档
-            doc_file_path = os.path.join(module_output_dir, f"{module_name}_doc.txt")
+            doc_file_path = os.path.join(module_output_dir, f"{module_name}_doc.md")
             if save_ai_response(response, doc_file_path):
                 print(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
             else:

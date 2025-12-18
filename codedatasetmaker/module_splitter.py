@@ -333,6 +333,58 @@ def analyze_module_boundaries(source_dir):
                 module_name = f"{os.path.basename(directory) if directory else 'root'}_module_{module_counter}"
                 modules[module_name].append(file_data['file'])
 
+    # 检查处理循环依赖
+    # 首先找到从未被依赖的模块，从根模块开始处理，有效防止依赖倒换
+    unvisited_modules = set(modules.keys())
+    for module_name, dependencie_models in dependencies.items():
+        unvisited_modules -= set(dependencie_models)
+
+    # 如果没有未被依赖的模块，则设法找出main模块
+    if not unvisited_modules:
+        for module_name, module_files in modules.items():
+            if (module_name.endswith('main') or module_name.start('main')):
+                unvisited_modules.add(module_name)
+            else:
+                for module_file in module_files:
+                    if module_file.endswith('main.c'):
+                        unvisited_modules.add(module_name)
+                        break
+
+            if not unvisited_modules:
+                # 查找有main函数的模块
+                for module_name, module_files in modules.items():
+                    for module_file in module_files:
+                        for function_info in file_info:
+                            if function_info['file'] == module_file:
+                                if 'main' in function_info['functions']:
+                                    unvisited_modules.add(module_name)
+                                    break
+                                break
+
+    all_modules = set(modules.keys())
+    def procress_module(module_name, parent_modules = set()):
+        parent_modules.add(module_name) # 添加当前模块，处理子模块时，根据父模块判断是否循环依赖
+        module_dependencies = dependencies[module_name]
+
+        need_del_dependency = set()
+        for dependency in module_dependencies:
+            if dependency not in parent_modules:
+                procress_module(dependency, parent_modules)
+            else:
+                # 有循环依赖，删除该依赖
+                need_del_dependency.add(dependency)
+
+        dependencies[module_name] = module_dependencies - need_del_dependency
+        parent_modules.discard(module_name) # 处理结束，返回上级模块
+        all_modules.discard(module_name) # 已处理的模块从待处理列表中删除
+
+    for module_name in unvisited_modules:
+        procress_module(module_name)
+
+    # 处理还没有处理的模块
+    for module_name in all_modules:
+        procress_module(module_name)
+
     return modules, dependencies
 
 
