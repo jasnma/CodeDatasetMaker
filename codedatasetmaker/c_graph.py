@@ -211,6 +211,65 @@ def print_ast(node, indent=0):
     for child in node.get_children():
         print_ast(child, indent + 1)
 
+
+def find_doc_comment_start(lines, start_line):
+    """
+    从函数 start_line 向上回退，找到连续注释块的起始行号
+    支持：
+      - 多个连续 //
+      - 单行 /* ... */
+      - 多行 /* ... */
+      - // 与 /* */ 混合连续
+    规则：
+      - 不跨空行
+      - 不跨非注释代码
+    行号为 1-based
+    """
+    i = start_line - 2  # 上一行（0-based）
+    comment_start = None
+    in_block_comment = False
+
+    while i >= 0:
+        line = lines[i].rstrip()
+        stripped = line.strip()
+
+        # 1️⃣ 空行：终止
+        if stripped == "":
+            break
+
+        # 2️⃣ 行注释 //
+        if stripped.startswith("//"):
+            comment_start = i + 1
+            i -= 1
+            continue
+
+        # 3️⃣ 块注释结束 */
+        if stripped.endswith("*/"):
+            comment_start = i + 1
+            in_block_comment = True
+            i -= 1
+            continue
+
+        # 4️⃣ 块注释中间行
+        if in_block_comment:
+            comment_start = i + 1
+            if "/*" in stripped:
+                in_block_comment = False
+            i -= 1
+            continue
+
+        # 5️⃣ 单行块注释 /* ... */
+        if stripped.startswith("/*") and stripped.endswith("*/"):
+            comment_start = i + 1
+            i -= 1
+            continue
+
+        # 6️⃣ 非注释代码：终止
+        break
+
+    return comment_start
+
+
 def parse_file(file_path, struct_union_maps, args=None):
     index = clang.cindex.Index.create()
     if args is None:
@@ -299,23 +358,22 @@ def parse_file(file_path, struct_union_maps, args=None):
             # 只有函数定义才添加到函数列表和调用图中
             if is_definition:
                 # 计算函数的起始行号和结束行号
-                start_line = node.location.line
-                end_line = start_line
-                
-                # 遍历函数的所有子节点，找到最大的行号作为结束行号
-                def find_max_line(cursor, max_line):
-                    if cursor.location.line > max_line:
-                        max_line = cursor.location.line
-                    for child in cursor.get_children():
-                        max_line = find_max_line(child, max_line)
-                    return max_line
-                
-                end_line = find_max_line(node, end_line)
+                start_line = node.extent.start.line
+                end_line = node.extent.end.line
+                definded_in = node.location.file.name
+
+                func_file = os.path.abspath(node.location.file.name)
+                with open(func_file, 'r', encoding='utf-8', errors='ignore') as f:
+                    func_content = f.readlines()
+                    comment_start = find_doc_comment_start(func_content, start_line)
+                    if comment_start is not None:
+                        start_line = comment_start
                 
                 # 添加到函数列表
                 if func_name and func_name not in file_info["functions"]:
                     file_info["functions"].append({
                         "name": func_name,
+                        "definded_in": definded_in,
                         "start_line": start_line,
                         "end_line": end_line
                     })
