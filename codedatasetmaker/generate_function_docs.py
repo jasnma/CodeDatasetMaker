@@ -342,6 +342,8 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
         print(f"已处理过函数 {file_path}:{function_base_name}")
         return None
     
+    procedured_functions.add(f"{file_path}:{function_base_name}")
+
     # 读取函数内容
     function_content = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
     
@@ -430,7 +432,7 @@ def main():
     except Exception as e:
         print(f"错误: {e}")
         return
-    
+
     # 为每个函数生成文档
     for function_name in sorted_functions:
         print(f"正在处理函数: {function_name}")

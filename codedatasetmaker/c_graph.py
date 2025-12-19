@@ -214,18 +214,12 @@ def print_ast(node, indent=0):
 
 def find_doc_comment_start(lines, start_line):
     """
-    从函数 start_line 向上回退，找到连续注释块的起始行号
     支持：
-      - 多个连续 //
-      - 单行 /* ... */
-      - 多行 /* ... */
-      - // 与 /* */ 混合连续
-    规则：
-      - 不跨空行
-      - 不跨非注释代码
-    行号为 1-based
+      - // 单行注释
+      - /* ... */ 单行块注释
+      - /**** 多行块注释，带对齐 * 
     """
-    i = start_line - 2  # 上一行（0-based）
+    i = start_line - 2  # 上一行
     comment_start = None
     in_block_comment = False
 
@@ -233,38 +227,38 @@ def find_doc_comment_start(lines, start_line):
         line = lines[i].rstrip()
         stripped = line.strip()
 
-        # 1️⃣ 空行：终止
-        if stripped == "":
+        # 空行
+        if stripped == "" and not in_block_comment:
             break
 
-        # 2️⃣ 行注释 //
+        # 行注释 //
         if stripped.startswith("//"):
             comment_start = i + 1
             i -= 1
             continue
 
-        # 3️⃣ 块注释结束 */
+        # 块注释结束 */
         if stripped.endswith("*/"):
             comment_start = i + 1
             in_block_comment = True
             i -= 1
             continue
 
-        # 4️⃣ 块注释中间行
+        # 块注释中间行（* 对齐）
         if in_block_comment:
             comment_start = i + 1
-            if "/*" in stripped:
+            if stripped.startswith("/*"):
                 in_block_comment = False
             i -= 1
             continue
 
-        # 5️⃣ 单行块注释 /* ... */
+        # 单行块注释 /* ... */
         if stripped.startswith("/*") and stripped.endswith("*/"):
             comment_start = i + 1
             i -= 1
             continue
 
-        # 6️⃣ 非注释代码：终止
+        # 非注释，终止
         break
 
     return comment_start
