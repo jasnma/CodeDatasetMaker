@@ -84,11 +84,16 @@ def topological_sort_functions(call_graph):
 
 def find_function_info(function_name, file_info):
     """根据函数名查找函数信息"""
+    parts = function_name.split(":")
+    file_path = parts[0]
+    function_name = parts[1]
+
     for file_data in file_info:
-        file_path = file_data["file"]
+        if file_path != file_data["file"]:
+            continue
+        
         for func in file_data["functions"]:
-            full_function_name = f"{file_path}:{func['name']}"
-            if full_function_name == function_name:
+            if func['name'] == function_name:
                 return file_data, func
     return None, None
 
@@ -212,10 +217,41 @@ def save_ai_response(response, output_path):
 
 
 def extract_function_doc_from_file(file_path):
-    """从文件中提取函数文档"""
+    """从文件中提取函数文档的功能描述部分"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
-            return f.read()
+            content = f.read()
+            
+        # 查找"功能描述"部分
+        # 查找"### 功能描述"标题
+        func_desc_start = content.find("### 功能描述")
+        if func_desc_start == -1:
+            # 如果没找到"### 功能描述"，尝试查找"功能描述"
+            func_desc_start = content.find("功能描述")
+            if func_desc_start == -1:
+                return content  # 如果都没找到，返回整个内容
+        
+        # 从"功能描述"开始截取
+        func_desc_content = content[func_desc_start:]
+        
+        # 查找下一个标题，如果有则截取到下一个标题之前
+        next_title_pos = func_desc_content.find("\n##", len("### 功能描述"))
+        if next_title_pos != -1:
+            func_desc_content = func_desc_content[:next_title_pos]
+        
+        # 去除标题本身，只保留内容
+        # 找到第一行换行符
+        first_newline = func_desc_content.find("\n")
+        if first_newline != -1:
+            func_desc_content = func_desc_content[first_newline+1:].strip()
+        else:
+            # 如果没有找到换行符，就去掉标题部分
+            if func_desc_content.startswith("### 功能描述"):
+                func_desc_content = func_desc_content[len("### 功能描述"):].strip()
+            elif func_desc_content.startswith("功能描述"):
+                func_desc_content = func_desc_content[len("功能描述"):].strip()
+        
+        return func_desc_content
     except FileNotFoundError:
         print(f"文件未找到: {file_path}")
         return None
@@ -224,27 +260,19 @@ def extract_function_doc_from_file(file_path):
         return None
 
 
-def extract_callees_docs(output_dir, callees, project_name):
+def extract_callees_docs(output_dir, callees, file_info, project_name):
     """提取被调用函数的文档"""
     callees_docs = {}
     
     for callee in callees:
-        # 解析callee格式: "file_path:function_name"
-        parts = callee.split(":")
-        if len(parts) != 2:
-            continue
-            
-        file_path = parts[0]
-        function_name = parts[1]
-        
-        # 构造文档文件路径（按照新的目录结构）
-        # 移除 .c 扩展名并构建目录结构
-        file_dir = os.path.dirname(file_path)
-        file_name_without_ext = os.path.splitext(os.path.basename(file_path))[0]
+        # 获取函数信息
+        _, func_info = find_function_info(callee, file_info)
+        file_path = func_info["definded_in"]
+        function_name = func_info["name"]
         
         # 构建文档文件路径
-        doc_file_path = os.path.join(output_dir, project_name, "functions", file_dir, file_name_without_ext, f"{function_name}_doc.md")
-        
+        doc_file_path = os.path.join(output_dir, project_name, "functions", file_path, f"{function_name}_doc.md")
+
         # 尝试读取文档
         doc_content = extract_function_doc_from_file(doc_file_path)
         if doc_content:
@@ -303,7 +331,7 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
         return None
     
     # 读取函数内容
-    function_content = read_function_content(file_data["file"], func_info["start_line"], func_info["end_line"], project_path)
+    function_content = read_function_content(func_info["definded_in"], func_info["start_line"], func_info["end_line"], project_path)
     
     if not function_content:
         print(f"错误: 无法读取函数 {function_name} 的内容")
@@ -313,22 +341,17 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
     callees = call_graph.get(function_name, [])
     
     # 提取被调用函数的文档
-    callees_docs = extract_callees_docs(output_dir, callees, project_name)
+    callees_docs = extract_callees_docs(output_dir, callees, file_info, project_name)
     
     # 生成提示词
     prompt = generate_function_prompt(function_name, function_content, callees, callees_docs)
     
     # 生成文件名
-    file_path = file_data["file"]
+    file_path = func_info["definded_in"]
     function_base_name = func_info["name"]
     
-    # 创建按照源文件目录结构的输出目录
-    # 移除 .c 扩展名并构建目录结构
-    file_dir = os.path.dirname(file_path)
-    file_name_without_ext = os.path.splitext(os.path.basename(file_path))[0]
-    
     # 构建输出目录结构
-    function_output_dir = os.path.join(output_dir, project_name, "functions", file_dir, file_name_without_ext)
+    function_output_dir = os.path.join(output_dir, project_name, "functions", file_path)
     os.makedirs(function_output_dir, exist_ok=True)
     
     # 生成文件名
