@@ -56,11 +56,33 @@ def generate_module_docs(project_dir, args):
         # 恢复原始的sys.argv
         sys.argv = original_argv
 
+
+def generate_function_docs(project_dir, args):
+    """运行函数文档生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_function_docs模块
+    from codedatasetmaker import generate_function_docs
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_function_docs.py', project_dir] + args
+    
+    try:
+        # 运行函数文档生成功能
+        generate_function_docs.main()
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'split', 'doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、split(模块分割) 或 doc(生成模块文档) (默认: analyze)')
+    parser.add_argument('--mode', choices=['analyze', 'split', 'doc', 'f_doc'], default='analyze',
+                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档) 或 f_doc(生成函数文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -85,6 +107,12 @@ def main():
         if args.output:
             doc_args.extend(['--output', args.output])
         generate_module_docs(args.project_dir, doc_args)
+    elif args.mode == 'f_doc':
+        # 将未知参数传递给函数文档生成功能
+        f_doc_args = unknown_args[:]
+        if args.output:
+            f_doc_args.extend(['--output', args.output])
+        generate_function_docs(args.project_dir, f_doc_args)
 
 if __name__ == "__main__":
     main()
