@@ -373,7 +373,7 @@ def parse_file(file_path, struct_union_maps, args=None):
                     })
                 # 使用文件路径作为前缀来区分同名函数
                 if func_name:
-                    unique_func_name = f"{relative_path}:{func_name}"
+                    unique_func_name = f"{definded_in}:{func_name}"
                     call_graph.setdefault(unique_func_name, [])
                     current_func = unique_func_name
                     
@@ -1196,10 +1196,11 @@ def resolve_call_graph(full_call_graph):
     func_to_paths = {}
     for full_key in full_call_graph:
         if ':' in full_key:
-            path, func_name = full_key.split(':', 1)
+            _, func_name = full_key.split(':', 1)
             if func_name not in func_to_paths:
-                func_to_paths[func_name] = []
-            func_to_paths[func_name].append(full_key)
+                func_to_paths[func_name] = [full_key]
+            else:
+                func_to_paths[func_name].append(full_key)
     
     # 解析调用关系
     resolved_graph = {}
@@ -1233,12 +1234,12 @@ def resolve_call_graph(full_call_graph):
 
 def save_json(call_graph, output_dir, project_name):
     """保存调用图为JSON"""
-    resolved_graph = resolve_call_graph(call_graph)
+    
     project_output_dir = os.path.join(output_dir, project_name)
     os.makedirs(project_output_dir, exist_ok=True)
     file_name = os.path.join(project_output_dir, "call_graph.json")
     with open(file_name, "w") as f:
-        json.dump(resolved_graph, f, indent=2)
+        json.dump(call_graph, f, indent=2)
     print(f"Global call graph saved to {file_name}")
 
 def would_create_cycle(parent_node, child_node):
@@ -1329,10 +1330,7 @@ def save_file_info_json(file_infos, output_dir, project_name, project_dir):
     """保存文件信息为JSON"""
     # 简化文件信息，只保留functions和includes字段
     simplified_file_infos = []
-    for file_info in file_infos:
-        # file_info["file"] 已经是相对于项目根目录的路径了，直接使用
-        file_path = file_info["file"]
-            
+    for file_path, file_info in file_infos.items():
         simplified_info = {
             "file": file_path,
             "functions": file_info["functions"],
@@ -1596,7 +1594,7 @@ def main(argv=None):
     c_files = get_c_files(project_dir)
 
     full_call_graph = {}
-    file_infos = []  # 存储所有文件的信息
+    file_infos = {}  # 存储所有文件的信息
     all_struct_fields = {}  # 存储所有结构体字段信息
     all_struct_uses = defaultdict(list)  # 存储所有结构体使用信息
     all_global_var_defs: dict[str, GlobalVarInfo] = {}  # 存储所有全局变量定义
@@ -1632,9 +1630,32 @@ def main(argv=None):
         # 合并到全局调用关系
         for func, callees in graph.items():
             full_call_graph.setdefault(func, []).extend(callees)
-        
+
+        # 处理inline 函数
+        functions = file_info["functions"]
+        if functions:
+            file = rel_path
+            for func in functions:
+                if func["definded_in"] != file:
+                    definded_in = func["definded_in"]
+                    if definded_in in file_infos:
+                        file_infos[definded_in]["functions"].append(func)
+                    else:
+                        file_infos[definded_in] = {
+                            "file": definded_in,
+                            "functions": [func],
+                            "includes": []
+                        }
+
+            file_info["functions"] = [
+                func for func in functions if func["definded_in"] == file
+            ]
+
         # 添加文件信息
-        file_infos.append(file_info)
+        file_infos.update({
+                rel_path: file_info
+            }
+        )
         
         # 合并结构体信息
         all_struct_fields.update(struct_fields)
@@ -1664,12 +1685,16 @@ def main(argv=None):
             for use in uses:
                 if use not in all_macro_uses[macro_name]:
                     all_macro_uses[macro_name].append(use)
+        
+    # 函数调用去重
+    for func_name, calls in full_call_graph.items():
+        full_call_graph[func_name] = list(set(calls))
 
     # 解析调用图用于显示和保存
-    resolved_graph = resolve_call_graph(full_call_graph)
+    full_call_graph = resolve_call_graph(full_call_graph)
     
     # 保存全局调用树（只保存全局的，不保存每个文件的）
-    save_text_tree(resolved_graph, output_dir, project_name)
+    save_text_tree(full_call_graph, output_dir, project_name)
 
     # 保存调用图 JSON
     save_json(full_call_graph, output_dir, project_name)
