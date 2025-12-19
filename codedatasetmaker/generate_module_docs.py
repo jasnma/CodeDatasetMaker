@@ -201,7 +201,7 @@ def save_ai_response(response, output_path):
         if "choices" in response and len(response["choices"]) > 0:
             content = response["choices"][0]["message"]["content"]
             # 去除头部的不可见字符，包括BOM和其他Unicode空白字符
-            content = content.strip("\u200B-\u200D\uFEFF\u2060")
+            content = content.strip("\u200B\u200C\u200D\u2060\uFEFF")
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return True

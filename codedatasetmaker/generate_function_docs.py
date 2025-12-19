@@ -12,6 +12,11 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 
+# 定义一个变量记住已经处理过的函数，有些定义在头文件中的函数
+# 重复被处理，增加这个变量可以避免重复处理
+procedured_functions = set()
+
+# 定义一个函数，用于加载JSON文件
 def load_json_file(file_path):
     """加载JSON文件"""
     try:
@@ -202,7 +207,7 @@ def save_ai_response(response, output_path):
         if "choices" in response and len(response["choices"]) > 0:
             content = response["choices"][0]["message"]["content"]
             # 去除头部的不可见字符，包括BOM和其他Unicode空白字符
-            content = content.strip("\u200B-\u200D\uFEFF\u2060")
+            content = content.strip("\u200B\u200C\u200D\u2060\uFEFF")
             with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             return True
@@ -330,8 +335,15 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
         print(f"错误: 找不到函数 {function_name} 的信息")
         return None
     
+    file_path = func_info["definded_in"]
+    function_base_name = func_info["name"]
+
+    if f"{file_path}:{function_base_name}" in procedured_functions:
+        print(f"已处理过函数 {file_path}:{function_base_name}")
+        return None
+    
     # 读取函数内容
-    function_content = read_function_content(func_info["definded_in"], func_info["start_line"], func_info["end_line"], project_path)
+    function_content = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
     
     if not function_content:
         print(f"错误: 无法读取函数 {function_name} 的内容")
@@ -345,10 +357,6 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
     
     # 生成提示词
     prompt = generate_function_prompt(function_name, function_content, callees, callees_docs)
-    
-    # 生成文件名
-    file_path = func_info["definded_in"]
-    function_base_name = func_info["name"]
     
     # 构建输出目录结构
     function_output_dir = os.path.join(output_dir, project_name, "functions", file_path)
