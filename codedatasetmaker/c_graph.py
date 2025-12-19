@@ -360,9 +360,9 @@ def parse_file(file_path, struct_union_maps, args=None):
                 # 计算函数的起始行号和结束行号
                 start_line = node.extent.start.line
                 end_line = node.extent.end.line
-                definded_in = node.location.file.name
-
                 func_file = os.path.abspath(node.location.file.name)
+                definded_in = os.path.relpath(func_file, project_root)
+
                 with open(func_file, 'r', encoding='utf-8', errors='ignore') as f:
                     func_content = f.readlines()
                     comment_start = find_doc_comment_start(func_content, start_line)
