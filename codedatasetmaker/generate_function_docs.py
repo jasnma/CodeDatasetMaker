@@ -265,28 +265,23 @@ def extract_function_doc_from_file(file_path):
         return None
 
 
-def extract_callees_docs(output_dir, callees, file_info, project_name):
+def extract_callees_docs(output_dir, callees, project_name):
     """提取被调用函数的文档"""
     callees_docs = {}
-    
+
     for callee in callees:
-        # 获取函数信息
-        _, func_info = find_function_info(callee, file_info)
-        file_path = func_info["definded_in"]
-        function_name = func_info["name"]
-        
         # 构建文档文件路径
-        doc_file_path = os.path.join(output_dir, project_name, "functions", file_path, f"{function_name}_doc.md")
+        doc_file_path = os.path.join(output_dir, project_name, "functions", callee, f"_doc.md")
 
         # 尝试读取文档
         doc_content = extract_function_doc_from_file(doc_file_path)
         if doc_content:
             callees_docs[callee] = doc_content
-    
+
     return callees_docs
 
 
-def generate_function_prompt(function_name, function_content, callees, callees_docs):
+def generate_function_prompt(function_name, function_content, callees, callees_docs, callers):
     """生成函数文档提示词"""
     # 构建被调用函数文档部分
     callees_docs_str = ""
@@ -320,13 +315,14 @@ def generate_function_prompt(function_name, function_content, callees, callees_d
         function_name=function_name,
         function_content=function_content,
         callees_json=json.dumps(callees, indent=2, ensure_ascii=False),
-        callees_docs=callees_docs_str
+        callees_docs=callees_docs_str,
+        callers_json=callers
     )
     
     return prompt
 
 
-def generate_function_doc(function_name, call_graph, file_info, project_path, output_dir, project_name, ai_config=None):
+def generate_function_doc(function_name, call_graph, reverse_call_graph, file_info, project_path, output_dir, project_name, ai_config=None):
     """生成单个函数的文档"""
     # 获取函数信息
     file_data, func_info = find_function_info(function_name, file_info)
@@ -338,11 +334,11 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
     file_path = func_info["definded_in"]
     function_base_name = func_info["name"]
 
-    if f"{file_path}:{function_base_name}" in procedured_functions:
-        print(f"已处理过函数 {file_path}:{function_base_name}")
+    if function_name in procedured_functions:
+        print(f"已处理过函数 {function_name}")
         return None
     
-    procedured_functions.add(f"{file_path}:{function_base_name}")
+    procedured_functions.add(function_name)
 
     # 读取函数内容
     function_content = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
@@ -353,12 +349,15 @@ def generate_function_doc(function_name, call_graph, file_info, project_path, ou
     
     # 获取调用的函数列表
     callees = call_graph.get(function_name, [])
-    
+
+    # 调用这个函数的列表
+    callers = reverse_call_graph.get(function_name, [])
+
     # 提取被调用函数的文档
-    callees_docs = extract_callees_docs(output_dir, callees, file_info, project_name)
-    
+    callees_docs = extract_callees_docs(output_dir, callees, project_name)
+
     # 生成提示词
-    prompt = generate_function_prompt(function_name, function_content, callees, callees_docs)
+    prompt = generate_function_prompt(function_name, function_content, callees, callees_docs, callers)
     
     # 构建输出目录结构
     function_output_dir = os.path.join(output_dir, project_name, "functions", file_path)
@@ -437,7 +436,7 @@ def main():
     for function_name in sorted_functions:
         print(f"正在处理函数: {function_name}")
         try:
-            generate_function_doc(function_name, call_graph, file_info, args.project_path, output_dir, project_name, ai_config)
+            generate_function_doc(function_name, call_graph, reverse_call_graph, file_info, args.project_path, output_dir, project_name, ai_config)
         except Exception as e:
             print(f"处理函数 '{function_name}' 时出错: {e}")
 
