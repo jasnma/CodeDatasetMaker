@@ -196,7 +196,7 @@ def analyze_module_boundaries(source_dir):
             continue
 
         dir_files[directory].append(file_path)
-    
+
     # 分析结果存储
     modules = defaultdict(list)
     dependencies = defaultdict(set)
@@ -220,6 +220,10 @@ def analyze_module_boundaries(source_dir):
                 if directory == get_directory(called_file) and called_file not in added_files:
                     modules[init_module_name].append(called_file)
                     added_files.add(called_file)
+                    # 从目录模块中删除文件
+                    dir_files[directory].remove(called_file)
+                    if not dir_files[directory]: # 如果目录模块为空，则删除该目录
+                        del dir_files[directory]
 
     # 对每个目录中的文件进行模块划分
     for directory, files in dir_files.items():
