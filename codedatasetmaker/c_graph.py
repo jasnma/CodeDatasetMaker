@@ -264,6 +264,63 @@ def find_doc_comment_start(lines, start_line):
     return comment_start
 
 
+# 从一行中剥离 C 注释，这是反向向前推的，每处理一行代码，下一行代码是当前行的前一行
+def strip_c_comments_r(line, in_block_comment):
+    """
+    反向扫描一行，剥离 C 注释
+    :param line: 字符串
+    :param in_block_comment: 是否当前在多行注释内部
+    :return: (clean_line, in_block_comment)
+    """
+    i = len(line) - 1
+    result = []
+
+    while i >= 0:
+        # 当前在块注释内部，找开始标记 /*
+        if in_block_comment:
+            if i > 0 and line[i-1:i+1] == "/*":
+                in_block_comment = False
+                i -= 2
+            else:
+                i -= 1
+            continue
+
+        # 当前不在块注释内部，遇到结束标记 */
+        if i > 0 and line[i-1:i+1] == "*/":
+            in_block_comment = True
+            i -= 2
+            continue
+
+        # 普通字符，加入结果
+        result.append(line[i])
+        i -= 1
+
+    # 反转回正常顺序
+    result.reverse()
+    return "".join(result), in_block_comment
+
+
+def find_prev_effective_line(lines, start_line):
+    j = start_line - 1
+    in_block_comment = False
+
+    while j >= 0:
+        raw = lines[j].rstrip()
+        cleaned, in_block_comment = strip_c_comments_r(raw, in_block_comment)
+        stripped = cleaned.strip()
+
+        if not stripped:
+            j -= 1
+            continue
+
+        if stripped.startswith("//"):
+            j -= 1
+            continue
+
+        return j, stripped
+
+    return None, None
+
 def parse_file(file_path, struct_union_maps, args=None):
     index = clang.cindex.Index.create()
     if args is None:
@@ -559,7 +616,16 @@ def parse_file(file_path, struct_union_maps, args=None):
                                 
                                 # 重新构造宏定义内容
                                 macro_content = '\n'.join(macro_lines)
-                                
+                            
+                            # 向前推第一行有效代码是否是#ifndef macro_name，如果是的话说明是一个保护宏不输出它
+                            if not macro_content: # 如果宏定义内容为空才去做检查
+                                line_num = node.location.line - 1  # 行号从1开始，索引从0开始
+                                _, line = find_prev_effective_line(lines, line_num)
+                                if line and line.startswith("#ifndef "):
+                                    find_macro_name = line[len("#ifndef "):].strip()
+                                    if macro_name in find_macro_name:
+                                        return
+
                         # 更新宏定义的位置信息
                         macro_definition_path = macro_relative_path
                     else:

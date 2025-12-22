@@ -1,6 +1,7 @@
 #ifndef HEADER_H
 #define HEADER_H
 
+#include "core.h"
 #include "utils.h"
 
 void function1();
