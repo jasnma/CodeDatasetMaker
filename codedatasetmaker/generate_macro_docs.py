@@ -327,9 +327,6 @@ def generate_macro_doc(macro_info, output_dir, project_name, project_path, ai_co
         return None
     
     processed_macros.add(macro_name)
-
-    # 生成提示词
-    prompt = generate_macro_prompt(macro_info, project_path)
     
     # 构建输出目录结构，按照宏定义的源文件路径组织
     defined_in = macro_info["defined_in"]
@@ -342,6 +339,14 @@ def generate_macro_doc(macro_info, output_dir, project_name, project_path, ai_co
     clean_macro_name = macro_name.replace("(", "_").replace(")", "_").replace(",", "_").replace(" ", "_")
     prompt_file_name = f"{clean_macro_name}_prompt.txt"
     doc_file_name = f"{clean_macro_name}_doc.md"
+
+    # 如果文档文件已经存在，则跳过
+    if os.path.exists(os.path.join(macro_output_dir, doc_file_name)):
+        print(f"Skipping {clean_macro_name}")
+        return
+
+    # 生成提示词
+    prompt = generate_macro_prompt(macro_info, project_path)
     
     # 保存提示词到文件
     prompt_file_path = os.path.join(macro_output_dir, prompt_file_name)
