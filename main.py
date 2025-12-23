@@ -78,11 +78,33 @@ def generate_function_docs(project_dir, args):
         # 恢复原始的sys.argv
         sys.argv = original_argv
 
+
+def generate_macro_docs(project_dir, args):
+    """运行宏文档生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_macro_docs模块
+    from codedatasetmaker import generate_macro_docs
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_macro_docs.py', project_dir] + args
+    
+    try:
+        # 运行宏文档生成功能
+        generate_macro_docs.main()
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'split', 'doc', 'f_doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档) 或 f_doc(生成函数文档) (默认: analyze)')
+    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc'], default='analyze',
+                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档)、f_doc(生成函数文档) 或 m_doc(生成宏文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -95,8 +117,7 @@ def main():
         if args.output:
             analyze_args.extend(['--output', args.output])
         analyze_project(args.project_dir, analyze_args)
-    elif args.mode == 'split':
-        # 将未知参数传递给模块分割功能
+
         split_args = unknown_args[:]
         if args.output:
             split_args.extend(['--output', args.output])
@@ -113,6 +134,12 @@ def main():
         if args.output:
             f_doc_args.extend(['--output', args.output])
         generate_function_docs(args.project_dir, f_doc_args)
+    elif args.mode == 'm_doc':
+        # 将未知参数传递给宏文档生成功能
+        m_doc_args = unknown_args[:]
+        if args.output:
+            m_doc_args.extend(['--output', args.output])
+        generate_macro_docs(args.project_dir, m_doc_args)
 
 if __name__ == "__main__":
     main()
