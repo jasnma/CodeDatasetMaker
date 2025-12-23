@@ -93,11 +93,17 @@ def process_union(node, project_root):
             except ValueError:
                 definition_location = node_file_path
 
+        # 获取联合体定义的起止行号
+        start_line = node.extent.start.line
+        end_line = node.extent.end.line
+
         # 为联合体创建一个特殊的条目，与结构体分开
         return {
             "union": union_name,
             "fields": fields,
-            "defined_in": definition_location
+            "defined_in": definition_location,
+            "start_line": start_line,
+            "end_line": end_line
         }
     
     return None
@@ -155,10 +161,16 @@ def process_struct(node, project_root):
             except ValueError:
                 definition_location = node_file_path
                 
+        # 获取结构体定义的起止行号
+        start_line = node.extent.start.line
+        end_line = node.extent.end.line
+                
         return {
             "struct": struct_name,
             "fields": fields,
-            "defined_in": definition_location
+            "defined_in": definition_location,
+            "start_line": start_line,
+            "end_line": end_line
         }
     else:
         print(f"Warning: Skipping non-struct node: {node.spelling}")
@@ -196,11 +208,17 @@ def process_enum(node, project_root):
             except ValueError:
                 definition_location = node_file_path
 
+        # 获取枚举定义的起止行号
+        start_line = node.extent.start.line
+        end_line = node.extent.end.line
+
         # 为枚举创建一个特殊的条目
         return {
             "enum": enum_name,
             "values": enum_values,
-            "defined_in": definition_location
+            "defined_in": definition_location,
+            "start_line": start_line,
+            "end_line": end_line
         }
     
     return None
@@ -1452,6 +1470,10 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
                 "defined_in": info["defined_in"],
                 "used_by": struct_uses.get(struct_name, [])
             }
+            # 添加起止行号信息（如果存在）
+            if "start_line" in info and "end_line" in info:
+                struct_item["start_line"] = info["start_line"]
+                struct_item["end_line"] = info["end_line"]
         elif "union" in info:
             # 联合体
             struct_item = {
@@ -1460,6 +1482,10 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
                 "defined_in": info["defined_in"],
                 "used_by": struct_uses.get(struct_name, [])
             }
+            # 添加起止行号信息（如果存在）
+            if "start_line" in info and "end_line" in info:
+                struct_item["start_line"] = info["start_line"]
+                struct_item["end_line"] = info["end_line"]
         elif "enum" in info:
             # 枚举
             struct_item = {
@@ -1468,6 +1494,10 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
                 "defined_in": info["defined_in"],
                 "used_by": struct_uses.get(struct_name, [])
             }
+            # 添加起止行号信息（如果存在）
+            if "start_line" in info and "end_line" in info:
+                struct_item["start_line"] = info["start_line"]
+                struct_item["end_line"] = info["end_line"]
         else:
             # 默认情况下，假设是结构体
             struct_item = {
@@ -1476,6 +1506,10 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
                 "defined_in": info["defined_in"],
                 "used_by": struct_uses.get(struct_name, [])
             }
+            # 添加起止行号信息（如果存在）
+            if "start_line" in info and "end_line" in info:
+                struct_item["start_line"] = info["start_line"]
+                struct_item["end_line"] = info["end_line"]
         struct_list.append(struct_item)
     
     with open(file_name, "w") as f:
