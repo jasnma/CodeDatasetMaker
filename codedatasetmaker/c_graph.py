@@ -618,9 +618,18 @@ def parse_file(file_path, struct_union_maps, args=None):
                                 macro_content = '\n'.join(macro_lines)
                             
                             # 向前推第一行有效代码是否是#ifndef macro_name，如果是的话说明是一个保护宏不输出它
-                            if not macro_content: # 如果宏定义内容为空才去做检查
+                            macro_value = macro_content.replace("#define", "").strip()
+                            macro_value = macro_value.replace(macro_name, "").strip()
+                            macro_value.trim()
+                            if macro_name == "__LCM32F037_CONF_H":
+                                print(f"找到宏定义: {macro_name}", "macro_value:", macro_value)
+
+                            if not macro_value: # 如果宏定义内容为空才去做检查
                                 line_num = node.location.line - 1  # 行号从1开始，索引从0开始
                                 _, line = find_prev_effective_line(lines, line_num)
+                                if macro_name == "__LCM32F037_CONF_H":
+                                    print(f"找到宏定义: {macro_name}", "line:", line)
+
                                 if line and line.startswith("#ifndef "):
                                     find_macro_name = line[len("#ifndef "):].strip()
                                     if macro_name in find_macro_name:
