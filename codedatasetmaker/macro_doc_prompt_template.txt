@@ -8,6 +8,11 @@
 
 宏定义位置: {macro_defined_in}
 
+宏定义文件内容:
+```c
+{macro_definition_file_content}
+```
+
 宏使用位置:
 {macro_used_in}
 

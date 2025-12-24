@@ -174,28 +174,20 @@ def extract_macro_doc_from_file(file_path):
         return None
 
 
-def extract_macro_usage_snippets(macro_name, used_in, project_path):
+def extract_macro_usage_snippets(macro_name, used_ins, project_path):
     """从源代码中提取宏使用的代码片段"""
     snippets = {}
     
     # 处理宏名称，如果是函数式宏则只取名称部分
     base_macro_name = macro_name.split('(')[0]
     
-    # 获取项目中的所有C/C++源文件
-    def get_c_files(directory):
-        """获取目录下所有C源文件"""
-        c_files = []
-        for root, dirs, files in os.walk(directory):
-            for file in files:
-                if file.endswith(('.c', '.h', '.cpp', '.cc')):
-                    c_files.append(os.path.join(root, file))
-        return c_files
-    
-    # 获取所有源文件
-    all_files = get_c_files(project_path)
-    
+    used_in_files = set()
+    for used_in in used_ins:
+        used_in_files.add(used_in.split(':')[0])
+
     # 在所有文件中查找宏的使用
-    for file_path in all_files:
+    for file_path in used_in_files:
+        file_path = os.path.join(project_path, file_path)
         # 读取文件内容
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -213,7 +205,7 @@ def extract_macro_usage_snippets(macro_name, used_in, project_path):
                  ("#if" in line or "#elif" in line or "#ifdef" in line))):
                 # 收集包含宏的行及其前后几行作为上下文
                 start = max(0, i - 2)
-                end = min(len(lines), i + 3)
+                end = min(len(lines), i + 10)
                 snippet = "".join(lines[start:end])
                 # 计算相对于项目根目录的相对路径
                 relative_path = os.path.relpath(file_path, project_path)
@@ -225,8 +217,6 @@ def extract_macro_usage_snippets(macro_name, used_in, project_path):
             snippets[relative_path] = "\n".join(snippet_lines)
     
     return snippets
-
-
 
 
 def generate_macro_usage_examples(macro_name, used_in, project_path):
@@ -289,6 +279,15 @@ def generate_macro_prompt(macro_info, project_path):
         # 如果宏没有内容（如包含保护宏），则只生成宏名称
         macro_definition = f"#define {macro_name}"
     
+    # 读取宏定义文件的完整内容
+    macro_definition_file_path = os.path.join(project_path, macro_info["defined_in"])
+    try:
+        with open(macro_definition_file_path, "r", encoding="utf-8") as f:
+            macro_definition_file_content = f.read()
+    except Exception as e:
+        print(f"读取宏定义文件 {macro_definition_file_path} 时出错: {e}")
+        macro_definition_file_content = "// 无法读取文件内容"
+    
     # 读取提示词模板
     try:
         # 首先尝试在当前目录查找模板文件
@@ -311,6 +310,7 @@ def generate_macro_prompt(macro_info, project_path):
         macro_name=macro_info["macro"],
         macro_definition=macro_definition,
         macro_defined_in=macro_info["defined_in"],
+        macro_definition_file_content=macro_definition_file_content,
         macro_used_in=json.dumps(macro_info["used_in"], indent=2, ensure_ascii=False),
         macro_usage_examples=usage_examples
     )
