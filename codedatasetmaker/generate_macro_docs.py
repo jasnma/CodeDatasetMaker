@@ -279,14 +279,32 @@ def generate_macro_prompt(macro_info, project_path):
         # 如果宏没有内容（如包含保护宏），则只生成宏名称
         macro_definition = f"#define {macro_name}"
     
-    # 读取宏定义文件的完整内容
+    # 读取宏定义文件并提取宏定义前后的代码片段
     macro_definition_file_path = os.path.join(project_path, macro_info["defined_in"])
     try:
         with open(macro_definition_file_path, "r", encoding="utf-8") as f:
-            macro_definition_file_content = f.read()
+            lines = f.readlines()
+        
+        # 查找宏定义的位置
+        macro_line_index = -1
+        for i, line in enumerate(lines):
+            # 查找完全匹配宏定义的行
+            if line.strip().startswith(f"#define {macro_name}") or line.strip() == f"#define {macro_name}":
+                macro_line_index = i
+                break
+        
+        if macro_line_index != -1:
+            # 提取宏定义前20行和后100行
+            start_line = max(0, macro_line_index - 20)
+            end_line = min(len(lines), macro_line_index + 101)  # +100行，+1因为切片是左闭右开
+            macro_context_lines = lines[start_line:end_line]
+            macro_context = "".join(macro_context_lines)
+        else:
+            # 如果没有找到宏定义，使用默认上下文
+            macro_context = "// 无法找到宏定义位置\n" + "".join(lines[:50])  # 使用前50行作为默认上下文
     except Exception as e:
         print(f"读取宏定义文件 {macro_definition_file_path} 时出错: {e}")
-        macro_definition_file_content = "// 无法读取文件内容"
+        macro_context = "// 无法读取文件内容"
     
     # 读取提示词模板
     try:
@@ -310,7 +328,7 @@ def generate_macro_prompt(macro_info, project_path):
         macro_name=macro_info["macro"],
         macro_definition=macro_definition,
         macro_defined_in=macro_info["defined_in"],
-        macro_definition_file_content=macro_definition_file_content,
+        macro_context=macro_context,
         macro_used_in=json.dumps(macro_info["used_in"], indent=2, ensure_ascii=False),
         macro_usage_examples=usage_examples
     )

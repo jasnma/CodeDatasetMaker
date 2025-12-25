@@ -8,9 +8,9 @@
 
 宏定义位置: {macro_defined_in}
 
-宏定义文件内容:
+宏上下文（宏定义前后代码）:
 ```c
-{macro_definition_file_content}
+{macro_context}
 ```
 
 宏使用位置:
