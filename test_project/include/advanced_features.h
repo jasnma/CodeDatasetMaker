@@ -16,6 +16,8 @@
 #define SQUARE(x) ((x) * (x))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
+typedef int int32_t;
+
 #define TAILQ_ENTRY(type)                                               \
 struct {                                                                \
     struct type *tqe_next;  /* next element */                          \
@@ -137,8 +139,8 @@ struct test_nickname {
         int POSITION;
         struct
         {
-            int16_t x;
-            int16_t y;
+            short x;
+            short y;
         } POSITION_X_Y;
     };
     union
@@ -146,15 +148,15 @@ struct test_nickname {
         int POSITION2;
         struct
         {
-            int16_t x;
-            int16_t y;
+            short x;
+            short y;
         } POSITION_X_Y_2;
     };
 
     struct
     {
-        int16_t x;
-        int16_t y;
+        short x;
+        short y;
     };
 };
 

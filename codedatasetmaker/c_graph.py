@@ -52,17 +52,49 @@ def process_union(node, project_root):
     for child in node.get_children():
         if child.kind == clang.cindex.CursorKind.UNION_DECL:
             embedded_union_name = child.get_usr()
+            child_name = child.spelling
             union_info = process_union(child, project_root)
             if union_info:
                 # 构造包含联合体内部字段信息的类型描述
                 field_type = {"union": union_info["fields"]}
-                embedded_childrens[embedded_union_name] = field_type
+                if child_name.startswith("union (anonymous"):
+                    # 未命名字段，直接添加
+                    fields.append({
+                        "name":"",
+                        "type": field_type
+                    })
+                else:
+                    # 可能是命名字段等待后续的FIELD_DECL节点得到名字
+                    if embedded_union_name in embedded_childrens:
+                        # 没有被FIELD_DECL命中，但新的usr又相同，说明是匿名字段
+                        old_field_type = embedded_childrens[embedded_union_name]
+                        fields.append({
+                            "name":"",
+                            "type": old_field_type
+                        })
+                    embedded_childrens[embedded_union_name] = field_type
         elif (child.kind == clang.cindex.CursorKind.STRUCT_DECL):
             embedded_struct_name = child.get_usr()
+            child_name = child.spelling
             struct_info = process_struct(child, project_root)
             if struct_info:
                 field_type = {"struct": struct_info["fields"]}
-                embedded_childrens[embedded_struct_name] = field_type
+                if child_name.startswith("struct (anonymous"):
+                    # 未命名字段，直接添加
+                    fields.append({
+                        "name":"",
+                        "type": field_type
+                    })
+                else:
+                    # 可能是命名字段等待后续的FIELD_DECL节点得到名字
+                    if embedded_struct_name in embedded_childrens:
+                        # 没有被FIELD_DECL命中，但新的usr又相同，说明是匿名字段
+                        old_field_type = embedded_childrens[embedded_struct_name]
+                        fields.append({
+                            "name":"",
+                            "type": old_field_type
+                        })
+                    embedded_childrens[embedded_struct_name] = field_type
         elif (child.kind == clang.cindex.CursorKind.ENUM_DECL):
             embedded_enum_name = child.get_usr()
             enum_info = process_enum(child, project_root)
@@ -81,10 +113,8 @@ def process_union(node, project_root):
                 fields.append({"name": field_name, "type": field_type})
 
     if embedded_childrens:
-        unnamed_childrens = []
         for child in embedded_childrens:
-            unnamed_childrens.append(embedded_childrens[child])
-        fields.append({"name": "unnamed", "fields": unnamed_childrens})
+            fields.append({"name": "", "fields": embedded_childrens[child]})
 
     if union_name and fields:
         # 获取联合体定义的实际位置
@@ -107,6 +137,8 @@ def process_union(node, project_root):
             "start_line": start_line,
             "end_line": end_line
         }
+    else:
+        print(f"Warning: Skipping non-union node: {node.spelling}")
     
     return None
 
@@ -120,17 +152,49 @@ def process_struct(node, project_root):
     for child in node.get_children():
         if child.kind == clang.cindex.CursorKind.UNION_DECL and child.is_definition():
             embedded_union_name = child.get_usr()
+            child_name = child.spelling
             union_info = process_union(child, project_root)
             if union_info:
                 # 构造包含联合体内部字段信息的类型描述
                 field_type = {"union": union_info["fields"]}
-                embedded_childrens[embedded_union_name] = field_type
+                if child_name.startswith("union (anonymous"):
+                    # 未命名字段，直接添加
+                    fields.append({
+                        "name":"",
+                        "type": field_type
+                    })
+                else:
+                    # 可能是命名字段等待后续的FIELD_DECL节点得到名字
+                    if embedded_union_name in embedded_childrens:
+                        # 没有被FIELD_DECL命中，但新的usr又相同，说明是匿名字段
+                        old_field_type = embedded_childrens[embedded_union_name]
+                        fields.append({
+                            "name":"",
+                            "type": old_field_type
+                        })
+                    embedded_childrens[embedded_union_name] = field_type
         elif (child.kind == clang.cindex.CursorKind.STRUCT_DECL) and child.is_definition():
             embedded_struct_name = child.get_usr()
+            child_name = child.spelling
             struct_info = process_struct(child, project_root)
             if struct_info:
                 field_type = {"struct": struct_info["fields"]}
-                embedded_childrens[embedded_struct_name] = field_type
+                if child_name.startswith("struct (anonymous"):
+                    # 未命名字段，直接添加
+                    fields.append({
+                        "name":"",
+                        "type": field_type
+                    })
+                else:
+                    # 可能是命名字段等待后续的FIELD_DECL节点得到名字
+                    if embedded_struct_name in embedded_childrens:
+                        # 没有被FIELD_DECL命中，但新的usr又相同，说明是匿名字段
+                        old_field_type = embedded_childrens[embedded_struct_name]
+                        fields.append({
+                            "name":"",
+                            "type": old_field_type
+                        })
+                    embedded_childrens[embedded_struct_name] = field_type
         elif (child.kind == clang.cindex.CursorKind.ENUM_DECL) and child.is_definition():
             embedded_enum_name = child.get_usr()
             enum_info = process_enum(child, project_root)
@@ -140,19 +204,17 @@ def process_struct(node, project_root):
         elif (child.kind == clang.cindex.CursorKind.FIELD_DECL):
             field_name = child.spelling
             field_type = child.type.spelling
-            type_user = child.type.get_canonical().get_declaration().get_usr()
-            if (type_user in embedded_childrens):
-                field_type = embedded_childrens[type_user]
-                del embedded_childrens[type_user]
+            type_usr = child.type.get_canonical().get_declaration().get_usr()
+            if (type_usr in embedded_childrens):
+                field_type = embedded_childrens[type_usr]
+                del embedded_childrens[type_usr]
 
             if field_name and field_type:
                 fields.append({"name": field_name, "type": field_type})
 
     if embedded_childrens:
-        unnamed_childrens = []
         for child in embedded_childrens:
-            unnamed_childrens.append(embedded_childrens[child])
-        fields.append({"name": "unnamed", "fields": unnamed_childrens})
+            fields.append({"name": "", "fields": embedded_childrens[child]})
 
     if struct_name and fields:
         # 获取结构体定义的实际位置
@@ -442,8 +504,9 @@ def parse_file(file_path, struct_union_maps, args=None):
                 struct_name = struct_info["struct"]
             else:
                 struct_info = process_struct(node, project_root)
-                struct_union_maps[struct_usr] = struct_info
-                struct_name = node.spelling
+                if struct_info:
+                    struct_union_maps[struct_usr] = struct_info
+                    struct_name = node.spelling
             if not struct_info:
                 return
             
@@ -480,8 +543,9 @@ def parse_file(file_path, struct_union_maps, args=None):
                 union_name = union_info["union"]
             else:
                 union_info = process_union(node, project_root)
-                struct_union_maps[union_usr] = union_info
-                union_name = union_info["union"]
+                if union_info:
+                    struct_union_maps[union_usr] = union_info
+                    union_name = union_info["union"]
             if not union_info:
                 return
 
@@ -513,8 +577,9 @@ def parse_file(file_path, struct_union_maps, args=None):
                 enum_name = enum_info["enum"]
             else:
                 enum_info = process_enum(node, project_root)
-                struct_union_maps[enum_usr] = enum_info
-                enum_name = enum_info["enum"]
+                if enum_info:
+                    struct_union_maps[enum_usr] = enum_info
+                    enum_name = enum_info["enum"]
             if not enum_info:
                 return
 
