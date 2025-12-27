@@ -338,8 +338,8 @@ def generate_struct_prompt(struct_info, project_path, global_var_info_data, file
     
     # 如果引用函数超过5个，随机选择5个
     import random
-    if len(filtered_used_by) > 5:
-        selected_functions = random.sample(filtered_used_by, 5)
+    if len(filtered_used_by) > 10:
+        selected_functions = random.sample(filtered_used_by, 10)
     else:
         selected_functions = filtered_used_by
     
