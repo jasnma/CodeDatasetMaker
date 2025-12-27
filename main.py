@@ -100,11 +100,34 @@ def generate_macro_docs(project_dir, args):
         # 恢复原始的sys.argv
         sys.argv = original_argv
 
+
+def generate_struct_docs(project_dir, args):
+    """运行结构体文档生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_struct_docs模块
+    from codedatasetmaker import generate_struct_docs
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_struct_docs.py', project_dir] + args
+    
+    try:
+        # 运行结构体文档生成功能
+        generate_struct_docs.main()
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档)、f_doc(生成函数文档) 或 m_doc(生成宏文档) (默认: analyze)')
+    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc'], default='analyze',
+                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档) 或 s_doc(生成结构体文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -140,6 +163,13 @@ def main():
         if args.output:
             m_doc_args.extend(['--output', args.output])
         generate_macro_docs(args.project_dir, m_doc_args)
+    elif args.mode == 's_doc':
+        # 将未知参数传递给结构体文档生成功能
+        s_doc_args = unknown_args[:]
+        if args.output:
+            s_doc_args.extend(['--output', args.output])
+        generate_struct_docs(args.project_dir, s_doc_args)
+
 
 if __name__ == "__main__":
     main()
