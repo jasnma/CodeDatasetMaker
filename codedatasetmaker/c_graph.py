@@ -232,6 +232,33 @@ def print_ast(node, indent=0):
         print_ast(child, indent + 1)
 
 
+def strip_ptr_ref_const(type_str: str) -> str:
+    """
+    剥离 C/C++ 类型字符串中的：
+    - 指针 *
+    - 引用 & / &&
+    - const 修饰符（任意位置）
+    只保留最底层类型名
+    """
+    if not type_str:
+        return type_str
+
+    s = type_str.strip()
+
+    # 1. 去掉所有 const（作为独立关键字）
+    s = re.sub(r'\bconst\b', '', s)
+
+    # 2. 反复去掉末尾的 * & &&
+    while True:
+        new = re.sub(r'\s*(\*|\&{1,2})\s*$', '', s)
+        if new == s:
+            break
+        s = new
+
+    # 3. 清理多余空格
+    s = re.sub(r'\s+', ' ', s)
+
+    return s.strip()
 
 def parse_file(file_path, struct_union_maps, args=None):
     index = clang.cindex.Index.create()
@@ -277,6 +304,8 @@ def parse_file(file_path, struct_union_maps, args=None):
     
     # 存储结构体使用信息
     struct_uses = defaultdict(list)  # 结构体名 -> [(文件路径:函数名), ...]
+
+    typedefs = {}
     
     # 存储全局变量定义和使用信息
     global_var_defs: dict[str, GlobalVarInfo] = {}  # 变量名 -> GlobalVarInfo
@@ -288,6 +317,17 @@ def parse_file(file_path, struct_union_maps, args=None):
     
     # 在visit_node函数外部定义一个变量来存储上次输出的时间
     last_print_time = [0.0]
+
+    def is_struct(name):
+        name = strip_ptr_ref_const(name)
+
+        if name in struct_fields:
+            return True
+        
+        if name in typedefs:
+            return typedefs[name] in struct_fields
+        
+        return False
     
     def visit_node(node, current_func=None, parent_node=None):
         # 控制输出频率，只有在时间超过1秒时才输出
@@ -352,19 +392,19 @@ def parse_file(file_path, struct_union_maps, args=None):
                             param_type = child.type.spelling
                             # 检查是否是结构体类型
                             if param_type.startswith("struct "):
-                                struct_name = param_type[7:]  # 去掉"struct "前缀
+                                struct_name = strip_ptr_ref_const(param_type[7:])  # 去掉"struct "前缀
                                 if struct_name:
-                                    use_location = f"{relative_path}:{func_name}"
+                                    use_location = current_func if current_func else f"{relative_path}:global"
                                     if use_location not in struct_uses[struct_name]:
                                         struct_uses[struct_name].append(use_location)
                             # 也检查不带"struct "前缀的情况
                             else:
                                 # 检查是否与已知结构体匹配
-                                for s_name in struct_fields.keys():
-                                    if s_name == param_type:
-                                        use_location = f"{relative_path}:{func_name}"
-                                        if use_location not in struct_uses[s_name]:
-                                            struct_uses[s_name].append(use_location)
+                                if is_struct(param_type):
+                                    struct_name = strip_ptr_ref_const(param_type)
+                                    use_location = current_func if current_func else f"{relative_path}:global"
+                                    if use_location not in struct_uses[struct_name]:
+                                        struct_uses[struct_name].append(use_location)
                                         
                 # 继续遍历子节点以处理函数体内的调用
                 for c in node.get_children():
@@ -387,6 +427,12 @@ def parse_file(file_path, struct_union_maps, args=None):
                 # 记录调用关系，避免重复记录
                 if called_func_name and called_func_name not in call_graph[current_func]:
                     call_graph[current_func].append(called_func_name)
+        elif node.kind == clang.cindex.CursorKind.TYPEDEF_DECL:
+            typedefs[
+                strip_ptr_ref_const(node.spelling)
+            ] = strip_ptr_ref_const(
+                node.underlying_typedef_type.spelling
+            )
         # 结构体定义
         elif node.kind == clang.cindex.CursorKind.STRUCT_DECL and node.is_definition():
             struct_info = None
@@ -707,7 +753,7 @@ def parse_file(file_path, struct_union_maps, args=None):
                         var_name = referenced_decl.spelling
                         if var_name in global_var_defs:
                             # 记录全局变量的使用
-                            use_location = f"{relative_path}:{current_func.split(':')[-1]}"
+                            use_location = current_func
                             if use_location not in global_var_uses[var_name]:
                                 global_var_uses[var_name].append(use_location)
                     # 检查是否引用了结构体
@@ -715,7 +761,7 @@ def parse_file(file_path, struct_union_maps, args=None):
                         struct_name = referenced_decl.spelling
                         if struct_name:
                             # 记录结构体的使用
-                            use_location = f"{relative_path}:{current_func.split(':')[-1]}"
+                            use_location = current_func
                             if use_location not in struct_uses[struct_name]:
                                 struct_uses[struct_name].append(use_location)
             except AttributeError:
@@ -728,91 +774,76 @@ def parse_file(file_path, struct_union_maps, args=None):
             var_type = node.type.spelling
             # 检查是否是结构体类型
             if var_type.startswith("struct "):
-                struct_name = var_type[7:]  # 去掉"struct "前缀
+                struct_name = strip_ptr_ref_const(var_type[7:])  # 去掉"struct "前缀
                 if struct_name:
-                    context = current_func.split(':')[-1] if current_func else "global"
-                    use_location = f"{relative_path}:{context}"
+                    use_location = current_func if current_func else f"{relative_path}:global"
                     if use_location not in struct_uses[struct_name]:
                         struct_uses[struct_name].append(use_location)
             # 也检查不带"struct "前缀的情况
             else:
                 # 检查是否与已知结构体匹配
-                for struct_name in struct_fields.keys():
-                    if struct_name == var_type:
-                        context = current_func.split(':')[-1] if current_func else "global"
-                        use_location = f"{relative_path}:{context}"
-                        if use_location not in struct_uses[struct_name]:
-                            struct_uses[struct_name].append(use_location)
+                if is_struct(var_type):
+                    struct_name = strip_ptr_ref_const(var_type)
+                    use_location = current_func if current_func else f"{relative_path}:global"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
                             
             # 检查返回类型是否是结构体
             result_type = node.result_type.spelling
             if result_type.startswith("struct "):
-                struct_name = result_type[7:]  # 去掉"struct "前缀
+                struct_name = strip_ptr_ref_const(result_type[7:])  # 去掉"struct "前缀
                 if struct_name:
-                    context = current_func.split(':')[-1] if current_func else "global"
-                    use_location = f"{relative_path}:{context}"
+                    use_location = current_func if current_func else f"{relative_path}:global"
                     if use_location not in struct_uses[struct_name]:
                         struct_uses[struct_name].append(use_location)
             else:
                 # 检查返回类型是否与已知结构体匹配
-                for struct_name in struct_fields.keys():
-                    if struct_name == result_type:
-                        context = current_func.split(':')[-1] if current_func else "global"
-                        use_location = f"{relative_path}:{context}"
-                        if use_location not in struct_uses[struct_name]:
-                            struct_uses[struct_name].append(use_location)
+                if is_struct(result_type):
+                    struct_name = strip_ptr_ref_const(result_type)
+                    use_location = current_func if current_func else f"{relative_path}:global"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
                             
         # 检查函数参数中的结构体类型使用
         elif node.kind == clang.cindex.CursorKind.PARM_DECL:
             param_type = node.type.spelling
             # 检查是否是结构体类型
             if param_type.startswith("struct "):
-                struct_name = param_type[7:]  # 去掉"struct "前缀
+                struct_name = strip_ptr_ref_const(param_type[7:])  # 去掉"struct "前缀
                 if struct_name:
                     # 获取参数所属的函数
                     parent = node.semantic_parent
                     if parent and parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-                        func_name = parent.spelling
-                        if func_name:
-                            use_location = f"{relative_path}:{func_name}"
-                            if use_location not in struct_uses[struct_name]:
-                                struct_uses[struct_name].append(use_location)
+                        use_location = current_func if current_func else f"{relative_path}:global"
+                        if use_location not in struct_uses[struct_name]:
+                            struct_uses[struct_name].append(use_location)
             # 也检查不带"struct "前缀的情况
             else:
                 # 检查是否与已知结构体匹配
-                for struct_name in struct_fields.keys():
-                    if struct_name == param_type:
-                        # 获取参数所属的函数
-                        parent = node.semantic_parent
-                        if parent and parent.kind == clang.cindex.CursorKind.FUNCTION_DECL:
-                            func_name = parent.spelling
-                            if func_name:
-                                use_location = f"{relative_path}:{func_name}"
-                                if use_location not in struct_uses[struct_name]:
-                                    struct_uses[struct_name].append(use_location)
+                if is_struct(param_type):
+                    struct_name = strip_ptr_ref_const(param_type)
+                    use_location = current_func if current_func else f"{relative_path}:global"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
                             
         # 检查函数返回类型中的结构体类型使用
         elif node.kind == clang.cindex.CursorKind.FUNCTION_DECL:
             return_type = node.result_type.spelling
             # 检查返回类型是否是结构体类型
             if return_type.startswith("struct "):
-                struct_name = return_type[7:]  # 去掉"struct "前缀
+                struct_name = strip_ptr_ref_const(return_type[7:])  # 去掉"struct "前缀
                 if struct_name:
-                    func_name = node.spelling
-                    if func_name:
-                        use_location = f"{relative_path}:{func_name}"
-                        if use_location not in struct_uses[struct_name]:
-                            struct_uses[struct_name].append(use_location)
+                    use_location = current_func if current_func else f"{relative_path}:global"
+                    if use_location not in struct_uses[struct_name]:
+                        struct_uses[struct_name].append(use_location)
             # 也检查不带"struct "前缀的情况
             else:
                 # 检查返回类型是否与已知结构体匹配
-                for struct_name in struct_fields.keys():
-                    if struct_name == return_type:
-                        func_name = node.spelling
-                        if func_name:
-                            use_location = f"{relative_path}:{func_name}"
-                            if use_location not in struct_uses[struct_name]:
-                                struct_uses[struct_name].append(use_location)
+                if is_struct(return_type):
+                    struct_name = strip_ptr_ref_const(return_type)
+                    use_location = current_func if current_func else f"{relative_path}:global"
+                    if use_location not in struct_uses[struct_name]:
+                            struct_uses[struct_name].append(use_location)
                             
             # 继续遍历子节点以处理函数内部的使用情况
             for c in node.get_children():
@@ -831,6 +862,25 @@ def parse_file(file_path, struct_union_maps, args=None):
             visit_node(c, current_func, node)
 
     visit_node(tu.cursor)
+
+    # 整理struct_uses，有的是针对typedef的引用，指向正确的struct
+    for type_name in typedefs.keys():
+        alias_of = typedefs[type_name]
+
+        if type_name in struct_uses and alias_of in struct_fields:
+            use_locations = set()
+            locations = struct_uses[type_name]
+            del struct_uses[type_name]
+            if locations:
+                use_locations.update(locations)
+
+            # 原名的也要取出来合并
+            if alias_of in struct_uses:
+                locations = struct_uses[alias_of]
+                if locations:
+                    use_locations.update(locations)
+
+            struct_uses[alias_of] = list(use_locations)
 
     return call_graph, relative_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses
 
