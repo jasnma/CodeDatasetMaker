@@ -7,6 +7,9 @@ import argparse
 import sys
 from collections import defaultdict
 
+# 导入日志模块
+from . import debug, info, warning, error, critical
+
 
 def load_json_file(file_path):
     """加载JSON文件"""

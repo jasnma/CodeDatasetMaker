@@ -4,6 +4,13 @@ import sys
 import os
 import argparse
 
+# 添加codedatasetmaker目录到Python路径
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+
+# 导入日志模块
+from codedatasetmaker import debug, info, warning, error, critical
+from codedatasetmaker import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+
 def analyze_project(project_dir, args):
     """运行代码分析功能"""
     # 添加codedatasetmaker目录到Python路径

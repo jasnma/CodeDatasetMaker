@@ -6,6 +6,9 @@ C语言解析工具函数
 用于查找注释、剥离注释等操作
 """
 
+# 导入日志模块
+from . import debug, info, warning, error, critical
+
 def find_doc_comment_start(lines, start_line):
     """
     支持：

@@ -14,6 +14,9 @@ from . import generate_file_tree
 from c_parser_utils import find_doc_comment_start, find_prev_effective_line
 from dataclasses import dataclass
 
+# 导入日志模块
+from . import debug, info, warning, error, critical
+
 @dataclass
 class GlobalVarInfo:
     name: str

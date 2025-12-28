@@ -11,6 +11,10 @@ from collections import defaultdict, deque
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
+# 导入日志模块
+from . import debug, info, warning, error, critical
+from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+
 
 # 定义一个变量记住已经处理过的宏，避免重复处理
 processed_macros = set()
@@ -93,16 +97,16 @@ def call_ai_api(prompt, config):
         return {"choices": [{"message": {"content": full_response}}]}
         
     except RateLimitError as e:
-        print(f"错误: 请求频率过高 {e}")
+        ai_error(f"请求频率过高: {e}")
         return None
     except APIConnectionError as e:
-        print(f"错误: API连接失败 {e}")
+        ai_error(f"API连接失败: {e}")
         return None
     except APIError as e:
-        print(f"错误: API返回错误 {e}")
+        ai_error(f"API返回错误: {e}")
         return None
     except Exception as e:
-        print(f"错误: API请求失败: {e}")
+        ai_error(f"API请求失败: {e}")
         return None
 
 
