@@ -37,6 +37,8 @@ def split_modules(project_dir, args):
     try:
         # 运行模块分割功能
         module_splitter.main()
+    except Exception as e:
+        error(f"模块分割功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -59,6 +61,8 @@ def generate_module_docs(project_dir, args):
     try:
         # 运行模块文档生成功能
         generate_module_docs.main()
+    except Exception as e:
+        error(f"模块文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -81,6 +85,8 @@ def generate_function_docs(project_dir, args):
     try:
         # 运行函数文档生成功能
         generate_function_docs.main()
+    except Exception as e:
+        error(f"函数文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -103,6 +109,8 @@ def generate_macro_docs(project_dir, args):
     try:
         # 运行宏文档生成功能
         generate_macro_docs.main()
+    except Exception as e:
+        error(f"宏文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -125,6 +133,8 @@ def generate_struct_docs(project_dir, args):
     try:
         # 运行结构体文档生成功能
         generate_struct_docs.main()
+    except Exception as e:
+        error(f"结构体文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv

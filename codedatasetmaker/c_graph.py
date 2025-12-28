@@ -141,7 +141,7 @@ def process_union(node, project_root):
             "end_line": end_line
         }
     else:
-        print(f"Warning: Skipping non-union node: {node.spelling}")
+        warning(f"Warning: Skipping non-union node: {node.spelling}")
     
     return None
 
@@ -240,7 +240,7 @@ def process_struct(node, project_root):
             "end_line": end_line
         }
     else:
-        print(f"Warning: Skipping non-struct node: {node.spelling}")
+        warning(f"Warning: Skipping non-struct node: {node.spelling}")
 
     return None
 
@@ -1045,7 +1045,7 @@ def extract_includes_from_source(file_path, file_info, include_dirs=[]):
                 ]
                 
                 if not found and include_name not in common_system_headers:
-                    print(f"Warning: Header file '{include_name}' not found (included in '{file_path}')")
+                    warning(f"Warning: Header file '{include_name}' not found (included in '{file_path}')")
     except Exception as e:
         pass  # 忽略文件读取错误
 

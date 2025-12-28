@@ -28,10 +28,10 @@ def load_json_file(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"错误: 找不到文件 {file_path}")
+        error(f"错误: 找不到文件 {file_path}")
         return None
     except json.JSONDecodeError as e:
-        print(f"错误: JSON解析失败 {file_path}: {e}")
+        error(f"错误: JSON解析失败 {file_path}: {e}")
         return None
 
 
@@ -41,10 +41,10 @@ def load_ai_config(config_path="ai_config.json"):
         with open(config_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
+        warning(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
         return None
     except json.JSONDecodeError as e:
-        print(f"错误: JSON解析失败 {config_path}: {e}")
+        error(f"错误: JSON解析失败 {config_path}: {e}")
         return None
 
 
@@ -62,7 +62,7 @@ def call_ai_api(prompt, config):
     
     # 检查必要参数
     if not api_key or api_key == "your_api_key_here":
-        print("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
+        warning("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
         return None
     
     # 创建OpenAI客户端
@@ -132,7 +132,7 @@ def save_ai_response(response, output_path):
                 json.dump(response, f, ensure_ascii=False, indent=2)
             return False
     except Exception as e:
-        print(f"错误: 保存AI响应失败: {e}")
+        error(f"错误: 保存AI响应失败: {e}")
         return False
 
 
@@ -144,7 +144,7 @@ def read_struct_definition_from_source(project_path, defined_in, start_line, end
 
         # 如果仍然没有找到文件，返回None
         if not os.path.exists(file_path):
-            print(f"警告: 找不到源文件 {file_path}")
+            warning(f"警告: 找不到源文件 {file_path}")
             return None
 
         # 读取文件内容
@@ -168,7 +168,7 @@ def read_struct_definition_from_source(project_path, defined_in, start_line, end
         
         return struct_definition.strip()
     except Exception as e:
-        print(f"读取源文件时出错: {e}")
+        error(f"读取源文件时出错: {e}")
         return None
 
 
@@ -180,7 +180,7 @@ def read_function_definition_from_source(project_path, defined_in, start_line, e
 
         # 如果仍然没有找到文件，返回None
         if not os.path.exists(file_path):
-            print(f"警告: 找不到源文件 {file_path}")
+            warning(f"警告: 找不到源文件 {file_path}")
             return None
 
         # 读取文件内容
@@ -204,7 +204,7 @@ def read_function_definition_from_source(project_path, defined_in, start_line, e
         
         return function_definition.strip()
     except Exception as e:
-        print(f"读取源文件时出错: {e}")
+        error(f"读取源文件时出错: {e}")
         return None
 
 
@@ -243,7 +243,7 @@ def load_fileinfo_data(project_path):
     
     # 如果找不到fileinfo.json，返回空列表
     if not os.path.exists(fileinfo_path):
-        print(f"警告: 找不到fileinfo.json文件")
+        warning(f"警告: 找不到fileinfo.json文件")
         return []
     
     # 读取fileinfo.json
@@ -251,7 +251,7 @@ def load_fileinfo_data(project_path):
         with open(fileinfo_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"读取fileinfo.json时出错: {e}")
+        error(f"读取fileinfo.json时出错: {e}")
         return []
 
 
@@ -263,7 +263,7 @@ def load_global_var_info_data(project_path):
     
     # 如果找不到global_var_info.json，返回空列表
     if not os.path.exists(global_var_info_path):
-        print(f"警告: 找不到global_var_info.json文件")
+        warning(f"警告: 找不到global_var_info.json文件")
         return []
     
     # 读取global_var_info.json
@@ -271,7 +271,7 @@ def load_global_var_info_data(project_path):
         with open(global_var_info_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        print(f"读取global_var_info.json时出错: {e}")
+        error(f"读取global_var_info.json时出错: {e}")
         return []
 
 
@@ -290,8 +290,8 @@ def generate_struct_prompt(struct_info, project_path, global_var_info_data, file
                 prompt_template = f.read()
         except FileNotFoundError:
             # 如果都找不到，报错退出
-            print("错误: 找不到结构体文档提示词模板文件 'struct_doc_prompt_template.txt'")
-            print("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
+            error("错误: 找不到结构体文档提示词模板文件 'struct_doc_prompt_template.txt'")
+            error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
             raise
     
     # 获取结构体名称
@@ -369,9 +369,9 @@ def generate_struct_prompt(struct_info, project_path, global_var_info_data, file
                     if function_code:
                         function_references.append(f"// 函数 {func_ref} :\n{function_code}")
                 except Exception as e:
-                    print(f"读取函数 {func_name} 的源代码时出错: {e}")
+                    error(f"读取函数 {func_name} 的源代码时出错: {e}")
             else:
-                print(f"未在fileinfo.json中找到函数 {func_name} 的信息")
+                warning(f"未在fileinfo.json中找到函数 {func_name} 的信息")
     
     # 将引用函数代码组合成字符串
     referenced_functions = "\n\n".join(function_references) if function_references else "无"
@@ -405,7 +405,7 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
         struct_name = struct_info["enum"]
     
     if not struct_name:
-        print("错误: 无法确定结构体名称")
+        error("错误: 无法确定结构体名称")
         return None
     
     if struct_name in processed_structs:

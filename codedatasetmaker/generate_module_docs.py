@@ -22,10 +22,10 @@ def load_json_file(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"错误: 找不到文件 {file_path}")
+        error(f"错误: 找不到文件 {file_path}")
         return None
     except json.JSONDecodeError as e:
-        print(f"错误: JSON解析失败 {file_path}: {e}")
+        error(f"错误: JSON解析失败 {file_path}: {e}")
         return None
 
 
@@ -124,10 +124,10 @@ def load_ai_config(config_path="ai_config.json"):
         with open(config_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
+        warning(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
         return None
     except json.JSONDecodeError as e:
-        print(f"错误: JSON解析失败 {config_path}: {e}")
+        error(f"错误: JSON解析失败 {config_path}: {e}")
         return None
 
 
@@ -145,7 +145,7 @@ def call_ai_api(prompt, config):
     
     # 检查必要参数
     if not api_key or api_key == "your_api_key_here":
-        print("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
+        warning("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
         return None
     
     # 创建OpenAI客户端
@@ -215,7 +215,7 @@ def save_ai_response(response, output_path):
                 json.dump(response, f, ensure_ascii=False, indent=2)
             return False
     except Exception as e:
-        print(f"错误: 保存AI响应失败: {e}")
+        error(f"错误: 保存AI响应失败: {e}")
         return False
 
 
@@ -241,10 +241,10 @@ def extract_duties_and_boundaries_from_file(file_path):
             doc_content = f.read()
         return extract_duties_and_boundaries(doc_content)
     except FileNotFoundError:
-        print(f"文件未找到: {file_path}")
+        error(f"文件未找到: {file_path}")
         return None
     except Exception as e:
-        print(f"读取文件时出错: {e}")
+        error(f"读取文件时出错: {e}")
         return None
 
 
@@ -290,7 +290,7 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     source_code = read_source_files(module_info["files"], project_path)
 
     if not source_code:
-        print(f"No source code found for module: {module_name}")
+        warning(f"No source code found for module: {module_name}")
         return None
     
     # 构造元数据
@@ -313,8 +313,8 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
                 prompt_template = f.read()
         except FileNotFoundError:
             # 如果都找不到，报错退出
-            print("错误: 找不到模块文档提示词模板文件 'module_doc_prompt_template.txt'")
-            print("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
+            error("错误: 找不到模块文档提示词模板文件 'module_doc_prompt_template.txt'")
+            error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
             raise
     
     # 填充模板
