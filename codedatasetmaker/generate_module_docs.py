@@ -346,9 +346,9 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
             if save_ai_response(response, doc_file_path):
                 info(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
             else:
-                print(f"AI API调用成功，但保存文档时出现问题")
+                ai_error(f"AI API调用成功，但保存{module_name}文档时出现问题")
         else:
-            print(f"AI API调用失败，将仅保留提示词文件")
+            ai_error(f"AI API调用失败，将仅保留{module_name}提示词文件")
     
     return prompt_file_path
 

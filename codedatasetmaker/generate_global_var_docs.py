@@ -377,9 +377,9 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
             if save_ai_response(response, doc_file_path):
                 info(f"已生成全局变量 '{var_name}' 的AI文档: {doc_file_path}")
             else:
-                error(f"AI API调用成功，但保存文档时出现问题")
+                ai_error(f"AI API调用成功，但保存{var_name}文档时出现问题")
         else:
-            print(f"AI API调用失败，将仅保留提示词文件")
+            ai_error(f"AI API调用失败，将仅保留{var_name}提示词文件")
     
     return prompt_file_path
 

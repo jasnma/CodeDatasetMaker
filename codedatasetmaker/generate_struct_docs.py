@@ -442,9 +442,9 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
             if save_ai_response(response, doc_file_path):
                 info(f"已生成结构体 '{struct_name}' 的AI文档: {doc_file_path}")
             else:
-                info(f"AI API调用成功，但保存文档时出现问题")
+                ai_error(f"AI API调用成功，但保存{struct_name}文档时出现问题")
         else:
-            print(f"AI API调用失败，将仅保留提示词文件")
+            ai_error(f"AI API调用失败，将仅保留{struct_name}提示词文件")
     
     return prompt_file_path
 
