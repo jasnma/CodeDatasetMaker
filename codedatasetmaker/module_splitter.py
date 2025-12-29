@@ -171,6 +171,14 @@ def analyze_module_boundaries(source_dir):
                     if caller_file != callee_file:
                         file_call_map[caller_file].add(callee_file)
 
+    # 根据include关系构建调用关系，更新file_call_map
+    for file_data in file_info:
+        caller_file = file_data['file']
+        callees = file_data.get('includes', [])
+        for callee_file in callees:
+            if caller_file != callee_file:
+                file_call_map[caller_file].add(callee_file)
+
     # 按目录组织文件
     dir_files = defaultdict(list)
     file_details = {}
@@ -198,6 +206,9 @@ def analyze_module_boundaries(source_dir):
             added_files.add(file_path)
             continue
 
+        if (file_path.endswith('.h') or file_path.endswith('.hpp')) and not file_data.get("functions"):
+            continue
+        
         dir_files[directory].append(file_path)
 
     # 分析结果存储
@@ -224,7 +235,10 @@ def analyze_module_boundaries(source_dir):
                     modules[init_module_name].append(called_file)
                     added_files.add(called_file)
                     # 从目录模块中删除文件
-                    dir_files[directory].remove(called_file)
+                    try:
+                        dir_files[directory].remove(called_file)
+                    except ValueError:
+                        pass
                     if not dir_files[directory]: # 如果目录模块为空，则删除该目录
                         del dir_files[directory]
 
@@ -314,6 +328,10 @@ def analyze_module_boundaries(source_dir):
     # 补充在file_info.json中存在但在调用图中未出现的文件
     all_files_in_info = set()
     for file_data in file_info:
+        file_path = file_data['file']
+        if (file_path.endswith('.h') or file_path.endswith('.hpp')) and not file_data.get("functions"):
+            continue
+
         directory = get_directory(file_data['file'])
         all_files_in_info.add(file_data['file'])
         

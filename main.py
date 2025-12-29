@@ -34,14 +34,7 @@ def split_modules(project_dir, args):
     # 设置新的sys.argv
     sys.argv = ['module_splitter.py', project_dir] + args
     
-    try:
-        # 运行模块分割功能
-        module_splitter.main()
-    except Exception as e:
-        error(f"模块分割功能执行出错: {e}")
-    finally:
-        # 恢复原始的sys.argv
-        sys.argv = original_argv
+    module_splitter.main()
 
 
 def generate_module_docs(project_dir, args):
@@ -167,7 +160,7 @@ def generate_global_var_docs(project_dir, args):
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc'], default='analyze',
+    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc'], default='analyze',
                         help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档) 或 g_doc(生成全局变量文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
