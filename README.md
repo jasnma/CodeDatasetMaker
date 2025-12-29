@@ -1,6 +1,6 @@
 # CodeDatasetMaker
 
-CodeDatasetMaker 是一个用于分析C/C++项目的工具，它可以生成项目的函数调用图、结构体信息、宏定义信息等。
+CodeDatasetMaker 是一个专门用于分析嵌入式C项目的工具，它可以生成项目的函数调用图、结构体信息、宏定义信息等。
 
 ## 功能特性
 

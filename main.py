@@ -140,11 +140,35 @@ def generate_struct_docs(project_dir, args):
         sys.argv = original_argv
 
 
+def generate_global_var_docs(project_dir, args):
+    """运行全局变量文档生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_global_var_docs模块
+    from codedatasetmaker import generate_global_var_docs
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_global_var_docs.py', project_dir] + args
+    
+    try:
+        # 运行全局变量文档生成功能
+        generate_global_var_docs.main()
+    except Exception as e:
+        error(f"全局变量文档生成功能执行出错: {e}")
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、split(模块分割)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档) 或 s_doc(生成结构体文档) (默认: analyze)')
+    parser.add_argument('--mode', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc'], default='analyze',
+                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档) 或 g_doc(生成全局变量文档) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -186,6 +210,12 @@ def main():
         if args.output:
             s_doc_args.extend(['--output', args.output])
         generate_struct_docs(args.project_dir, s_doc_args)
+    elif args.mode == 'g_doc':
+        # 将未知参数传递给全局变量文档生成功能
+        g_doc_args = unknown_args[:]
+        if args.output:
+            g_doc_args.extend(['--output', args.output])
+        generate_global_var_docs(args.project_dir, g_doc_args)
 
 
 if __name__ == "__main__":
