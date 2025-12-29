@@ -338,13 +338,13 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
-        print(f"正在调用AI API生成模块 '{module_name}' 的文档...")
+        info(f"正在调用AI API生成模块 '{module_name}' 的文档...")
         response = call_ai_api(prompt, ai_config)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(module_output_dir, f"{module_name}_doc.md")
             if save_ai_response(response, doc_file_path):
-                print(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
+                info(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
             else:
                 print(f"AI API调用成功，但保存文档时出现问题")
         else:
