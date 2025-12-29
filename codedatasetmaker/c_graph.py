@@ -11,7 +11,7 @@ from anytree import Node, RenderTree
 import xml.etree.ElementTree as ET
 from collections import defaultdict
 from . import generate_file_tree
-from c_parser_utils import find_doc_comment_start, find_prev_effective_line
+from .c_parser_utils import find_doc_comment_start, find_prev_effective_line
 from dataclasses import dataclass
 
 # 导入日志模块

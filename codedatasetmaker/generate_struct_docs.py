@@ -10,7 +10,7 @@ import argparse
 from collections import defaultdict
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
-from c_parser_utils import find_doc_comment_start
+from .c_parser_utils import find_doc_comment_start
 
 # 导入日志模块
 from . import debug, info, warning, error, critical

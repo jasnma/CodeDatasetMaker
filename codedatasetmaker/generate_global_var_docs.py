@@ -11,31 +11,14 @@ import argparse
 from collections import defaultdict
 from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
+from .c_parser_utils import find_doc_comment_start
 
-# 添加codedatasetmaker目录到sys.path，以便能够导入模块
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-
-# 尝试相对导入
-try:
-    from c_parser_utils import find_doc_comment_start
-    # 导入日志模块
-    from . import debug, info, warning, error, critical
-    from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
-except ImportError:
-    # 如果相对导入失败，尝试绝对导入
-    try:
-        from codedatasetmaker.c_parser_utils import find_doc_comment_start
-        from codedatasetmaker.logger import debug, info, warning, error, critical
-        from codedatasetmaker.logger import ai_debug, ai_info, ai_warning, ai_error, ai_critical
-    except ImportError:
-        # 如果都失败了，打印错误信息并退出
-        error("错误: 无法导入所需的模块")
-        sys.exit(1)
-
+# 导入日志模块
+from . import debug, info, warning, error, critical
+from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
 
 # 定义一个变量记住已经处理过的全局变量
 processed_vars = set()
-
 
 # 定义一个函数，用于加载JSON文件
 def load_json_file(file_path):
@@ -396,7 +379,7 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
             else:
                 error(f"AI API调用成功，但保存文档时出现问题")
         else:
-            error(f"AI API调用失败，将仅保留提示词文件")
+            print(f"AI API调用失败，将仅保留提示词文件")
     
     return prompt_file_path
 
