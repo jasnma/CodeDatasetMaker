@@ -243,7 +243,7 @@ def analyze_module_boundaries(source_dir):
                         local_file_calls[file].add(called_file)
                         local_file_calls[called_file].add(file)  # 添加反向连接
             else:
-                warning(f"Warning: File '{file}' not found in file_call_map.")
+                warning(f"File '{file}' not found in file_call_map.")
 
         # 查找该目录中的连通分量（模块），考虑文件大小限制
         file_components = find_connected_components_with_size_limit(files, local_file_calls, file_details, source_dir)

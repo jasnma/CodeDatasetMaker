@@ -24,6 +24,20 @@ class GlobalVarInfo:
     file: str
     is_definition: bool
 
+@dataclass
+class ParseFileResult:
+    graph: defaultdict
+    rel_path: str
+    file_info: defaultdict
+    struct_fields:defaultdict
+    struct_uses: defaultdict[str, list]
+    global_var_defs: dict[str, GlobalVarInfo]
+    global_var_uses: defaultdict[str, list]
+    macro_defs: defaultdict
+    macro_uses: defaultdict[str, list]
+    includes: defaultdict[str, set]
+
+
 # 确保 libclang 已正确配置
 try:
     # 尝试设置 libclang 路径（根据不同系统可能需要调整）
@@ -349,7 +363,10 @@ def parse_file(file_path, struct_union_maps, args=None):
         "macros": [],
         "includes": []
     }
-    
+
+    # 保存include信息，某个文件包含了哪些头文件
+    includes = defaultdict(set)
+
     # 标准化文件路径，移除工作目录前缀（如果存在）
     normalized_path = os.path.abspath(file_path)
     # 从命令行参数中获取项目根目录
@@ -721,50 +738,53 @@ def parse_file(file_path, struct_union_maps, args=None):
         # 包含文件
         elif node.kind == clang.cindex.CursorKind.INCLUSION_DIRECTIVE:
             include_name = node.spelling
-            if include_name and include_name not in file_info["includes"]:
-                # 尝试将包含文件路径转换为相对于项目根目录的路径
-                if node.location.file:
-                    include_file_path = os.path.abspath(node.location.file.name)
-                    include_dir = os.path.dirname(include_file_path)
-                    
-                    # 对于相对路径包含（""）尝试解析实际路径
-                    if not include_name.startswith('<') and not include_name.endswith('>'):
-                        # 根据当前文件的相对路径、include path逐个去匹配
-                        # 首先尝试在当前文件所在目录查找
-                        potential_path = os.path.join(include_dir, include_name)
-                        if os.path.exists(potential_path):
-                            try:
-                                relative_include_path = os.path.relpath(potential_path, project_root)
-                                file_info["includes"].append(relative_include_path)
-                            except ValueError:
-                                # 处理跨驱动器的情况（Windows）
-                                file_info["includes"].append(include_name)
-                        else:
-                            # 如果在当前文件目录找不到，尝试在项目包含路径中查找
-                            found = False
-                            # 遍历所有包含路径
-                            for include_path in [os.path.join(project_root, "include")] + args[1:]:  # 使用args中的包含路径
-                                potential_path = os.path.join(include_path, include_name)
-                                if os.path.exists(potential_path):
-                                    try:
-                                        relative_include_path = os.path.relpath(potential_path, project_root)
-                                        file_info["includes"].append(relative_include_path)
-                                        found = True
-                                        break
-                                    except ValueError:
-                                        # 处理跨驱动器的情况（Windows）
-                                        file_info["includes"].append(include_name)
-                                        found = True
-                                        break
-                            
-                            # 如果在所有包含路径中都找不到，仍然使用原始名称
-                            if not found:
-                                file_info["includes"].append(include_name)
+
+            location_file = node.location.file.name
+            if location_file:
+                include_file_path = os.path.abspath(location_file)
+                include_dir = os.path.dirname(include_file_path)
+                relative_location_file = os.path.relpath(include_file_path, project_root)
+
+                # 对于相对路径包含（""）尝试解析实际路径
+                if not include_name.startswith('<') and not include_name.endswith('>'):
+                    # 根据当前文件的相对路径、include path逐个去匹配
+                    # 首先尝试在当前文件所在目录查找
+                    potential_path = os.path.join(include_dir, include_name)
+                    if os.path.exists(potential_path):
+                        try:
+                            relative_include_path = os.path.relpath(potential_path, project_root)
+                            includes[relative_location_file].add(relative_include_path)
+                        except ValueError:
+                            # 处理跨驱动器的情况（Windows）
+                            includes[relative_location_file].add(include_name)
                     else:
-                        # 对于系统包含（<>）直接添加
-                        file_info["includes"].append(include_name)
+                        # 如果在当前文件目录找不到，尝试在项目包含路径中查找
+                        found = False
+                        # 遍历所有包含路径
+                        for include_path in args[1:]:  # 使用args中的包含路径
+                            if include_path.startswith("-I"):
+                                include_path = include_path[2:]
+                            include_path = os.path.abspath(include_path)
+                            potential_path = os.path.join(include_path, include_name)
+                            if os.path.exists(potential_path):
+                                try:
+                                    relative_include_path = os.path.relpath(potential_path, project_root)
+                                    includes[relative_location_file].add(relative_include_path)
+                                    found = True
+                                    break
+                                except ValueError:
+                                    # 处理跨驱动器的情况（Windows）
+                                    includes[relative_location_file].add(include_name)
+                                    found = True
+                                    break
+                        
+                        # 如果在所有包含路径中都找不到，仍然使用原始名称
+                        if not found:
+                            includes[relative_location_file].add(include_name)
                 else:
-                    file_info["includes"].append(include_name)
+                    # 对于系统包含（<>）直接添加
+                    includes[relative_location_file].add(include_name)
+
         # 全局变量声明/定义
         elif node.kind == clang.cindex.CursorKind.VAR_DECL and not current_func:
             var_name = node.spelling
@@ -949,8 +969,18 @@ def parse_file(file_path, struct_union_maps, args=None):
                     use_locations.update(locations)
 
             struct_uses[alias_of] = list(use_locations)
-
-    return call_graph, relative_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses
+            
+    return ParseFileResult(graph=call_graph,
+            rel_path=relative_path,
+            file_info=file_info,
+            struct_fields=struct_fields,
+            struct_uses=struct_uses,
+            global_var_defs=global_var_defs,
+            global_var_uses=global_var_uses,
+            macro_defs=macro_defs,
+            macro_uses=macro_uses,
+            includes=includes
+        )
 
 def extract_macros_from_source(file_path, file_info):
     """通过正则表达式从源代码中提取宏定义"""
@@ -1741,16 +1771,16 @@ def main(argv=None):
     struct_union_maps = {}
 
     for f in c_files:
-        graph, rel_path, file_info, struct_fields, struct_uses, global_var_defs, global_var_uses, macro_defs, macro_uses = parse_file(f, struct_union_maps, args=parse_args)
+        result = parse_file(f, struct_union_maps, args=parse_args)
 
         # 合并到全局调用关系
-        for func, callees in graph.items():
+        for func, callees in result.graph.items():
             full_call_graph.setdefault(func, []).extend(callees)
 
         # 处理inline 函数
-        functions = file_info["functions"]
+        functions = result.file_info["functions"]
         if functions:
-            file = rel_path
+            file = result.rel_path
             for func in functions:
                 if func["definded_in"] != file:
                     definded_in = func["definded_in"]
@@ -1763,41 +1793,52 @@ def main(argv=None):
                             "includes": []
                         }
 
-            file_info["functions"] = [
+            result.file_info["functions"] = [
                 func for func in functions if func["definded_in"] == file
             ]
 
         # 添加文件信息
         file_infos.update({
-                rel_path: file_info
+                result.rel_path: result.file_info
             }
         )
+
+        #  处理头文件include
+        for include_location_file in result.includes.keys():
+            if include_location_file in file_infos:
+                file_infos[include_location_file]["includes"] = list(result.includes[include_location_file])
+            else:
+                file_infos[include_location_file] = {
+                    "file": include_location_file,
+                    "functions": [],
+                    "includes": list(result.includes[include_location_file])
+                }
         
         # 合并结构体信息
-        all_struct_fields.update(struct_fields)
+        all_struct_fields.update(result.struct_fields)
         
         # 合并结构体使用信息
-        for struct_name, uses in struct_uses.items():
+        for struct_name, uses in result.struct_uses.items():
             for use in uses:
                 if use not in all_struct_uses[struct_name]:
                     all_struct_uses[struct_name].append(use)
 
         # 合并全局变量定义
-        for var_name, def_info in global_var_defs.items():
+        for var_name, def_info in result.global_var_defs.items():
             if def_info.is_definition:
                 all_global_var_defs[var_name] = def_info
         
         # 合并全局变量使用信息
-        for var_name, uses in global_var_uses.items():
+        for var_name, uses in result.global_var_uses.items():
             for use in uses:
                 if use not in all_global_var_uses[var_name]:
                     all_global_var_uses[var_name].append(use)
         
         # 合并宏定义信息
-        all_macro_defs.update(macro_defs)
+        all_macro_defs.update(result.macro_defs)
         
         # 合并宏使用信息
-        for macro_name, uses in macro_uses.items():
+        for macro_name, uses in result.macro_uses.items():
             for use in uses:
                 if use not in all_macro_uses[macro_name]:
                     all_macro_uses[macro_name].append(use)
