@@ -440,7 +440,7 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
             # 保存AI生成的文档
             doc_file_path = os.path.join(struct_output_dir, doc_file_name)
             if save_ai_response(response, doc_file_path):
-                print(f"已生成结构体 '{struct_name}' 的AI文档: {doc_file_path}")
+                info(f"已生成结构体 '{struct_name}' 的AI文档: {doc_file_path}")
             else:
                 print(f"AI API调用成功，但保存文档时出现问题")
         else:
@@ -482,7 +482,7 @@ def main():
     
     # 为每个结构体生成文档
     for struct_item in struct_info:
-        print(f"正在处理结构体: {struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))}")
+        info(f"正在处理结构体: {struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))}")
         try:
             generate_struct_doc(struct_item, project_name, output_dir, ai_config, args.project_path, global_var_info_data, fileinfo_data)
         except Exception as e:

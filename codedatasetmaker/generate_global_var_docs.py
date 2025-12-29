@@ -29,7 +29,7 @@ except ImportError:
         from codedatasetmaker.logger import ai_debug, ai_info, ai_warning, ai_error, ai_critical
     except ImportError:
         # 如果都失败了，打印错误信息并退出
-        print("错误: 无法导入所需的模块")
+        error("错误: 无法导入所需的模块")
         sys.exit(1)
 
 
@@ -382,7 +382,7 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
     with open(prompt_file_path, "w", encoding="utf-8") as f:
         f.write(prompt)
     
-    print(f"已生成全局变量 '{var_name}' 的文档提示词文件: {prompt_file_path}")
+    info(f"已生成全局变量 '{var_name}' 的文档提示词文件: {prompt_file_path}")
     
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
@@ -392,11 +392,11 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
             # 保存AI生成的文档
             doc_file_path = os.path.join(var_output_dir, doc_file_name)
             if save_ai_response(response, doc_file_path):
-                print(f"已生成全局变量 '{var_name}' 的AI文档: {doc_file_path}")
+                info(f"已生成全局变量 '{var_name}' 的AI文档: {doc_file_path}")
             else:
-                print(f"AI API调用成功，但保存文档时出现问题")
+                error(f"AI API调用成功，但保存文档时出现问题")
         else:
-            print(f"AI API调用失败，将仅保留提示词文件")
+            error(f"AI API调用失败，将仅保留提示词文件")
     
     return prompt_file_path
 
@@ -431,11 +431,11 @@ def main():
     
     # 为每个全局变量生成文档
     for var_item in global_var_info:
-        print(f"正在处理全局变量: {var_item.get('var', '未知')}")
+        info(f"正在处理全局变量: {var_item.get('var', '未知')}")
         try:
             generate_var_doc(var_item, project_name, output_dir, ai_config, args.project_path, fileinfo_data)
         except Exception as e:
-            print(f"处理全局变量时出错: {e}")
+            error(f"处理全局变量时出错: {e}")
 
 
 if __name__ == "__main__":
