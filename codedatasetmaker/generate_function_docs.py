@@ -231,6 +231,20 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
         return None
     
     procedured_functions.add(function_name)
+    
+    # 构建输出目录结构
+    function_output_dir = os.path.join(output_dir, project_name, "functions", file_path)
+    os.makedirs(function_output_dir, exist_ok=True)
+    
+    # 生成文件名
+    prompt_file_name = f"{function_base_name}_prompt.txt"
+    doc_file_name = f"{function_base_name}_doc.md"
+
+    # 如果文档文件已经存在，则跳过
+    doc_file_path = os.path.join(function_output_dir, doc_file_name)
+    if os.path.exists(doc_file_path):
+        info(f"Skipping {function_base_name}")
+        return
 
     # 读取函数内容
     function_content = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
@@ -247,18 +261,10 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
 
     # 提取被调用函数的文档
     callees_docs = extract_callees_docs(output_dir, callees, project_name)
-
+    
     # 生成提示词
     prompt = generate_function_prompt(function_name, function_content, callees, callees_docs, callers)
-    
-    # 构建输出目录结构
-    function_output_dir = os.path.join(output_dir, project_name, "functions", file_path)
-    os.makedirs(function_output_dir, exist_ok=True)
-    
-    # 生成文件名
-    prompt_file_name = f"{function_base_name}_prompt.txt"
-    doc_file_name = f"{function_base_name}_doc.md"
-    
+
     # 保存提示词到文件
     prompt_file_path = os.path.join(function_output_dir, prompt_file_name)
     with open(prompt_file_path, "w", encoding="utf-8") as f:
@@ -272,7 +278,6 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
         response = call_ai_api(prompt, ai_config)
         if response:
             # 保存AI生成的文档
-            doc_file_path = os.path.join(function_output_dir, doc_file_name)
             if save_ai_response(response, doc_file_path):
                 info(f"已生成函数 '{function_name}' 的AI文档: {doc_file_path}")
             else:
