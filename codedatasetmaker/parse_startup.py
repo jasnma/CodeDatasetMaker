@@ -357,6 +357,7 @@ def generate_ai_prompt(startup_info):
 请注意：
 - entry_function_calls: 入口函数（通常是Reset_Handler）调用的函数列表
 - exported_functions: 所有通过EXPORT指令导出的函数，每个函数都应包含is_weak字段来标识是否为弱函数（带有[WEAK]标记）
+- 返回内容时请使用中文
 
 请确保输出是严格的JSON格式，不要包含任何额外的文本或解释。
 """
