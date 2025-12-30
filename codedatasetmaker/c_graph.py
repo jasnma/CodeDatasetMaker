@@ -1794,6 +1794,8 @@ def load_startup_analysis_result(full_call_graph, file_infos, output_dir, projec
 
                 # 添加入口函数调用的函数
                 for called_func in entry_function_calls:
+                    if called_func == "__main":
+                        called_func = "main"
                     full_call_graph[entry_func_key].append(called_func)
         else:
             print(f"Startup analysis result file not found: {startup_analysis_path}")
