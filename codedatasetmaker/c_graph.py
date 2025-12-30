@@ -1709,6 +1709,97 @@ def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, proj
         json.dump(global_var_list, f, indent=2)
     print(f"Global variable info saved to {file_name}")
 
+def load_startup_analysis_result(full_call_graph, file_infos, output_dir, project_name):
+    """加载启动分析结果并更新调用图和文件信息"""
+    try:
+        # 构建 startup_analysis_result.json 的路径
+        startup_analysis_path = os.path.join(output_dir, project_name, "startup_analysis_result.json")
+        if os.path.exists(startup_analysis_path):
+            with open(startup_analysis_path, 'r', encoding='utf-8') as f:
+                startup_data = json.load(f)
+            
+            # 构造启动文件的虚拟路径
+            startup_file_path = "startup_file"  # 这里可以替换为实际的启动文件路径
+            
+            # 临时列表存储需要添加的函数
+            funcs_to_add = []
+            
+            # 处理导出的函数
+            exported_functions = startup_data.get("exported_functions", [])
+            for func_info in exported_functions:
+                func_name = func_info["name"]
+                is_weak = func_info.get("is_weak", False)
+                
+                # 如果是 weak 函数且已经存在同名函数，则不覆盖
+                if is_weak:
+                    # 检查是否已经存在同名函数
+                    func_exists = False
+                    for existing_key in full_call_graph.keys():
+                        if existing_key.endswith(f":{func_name}"):
+                            func_exists = True
+                            break
+                    
+                    # 如果函数不存在，则添加到临时列表
+                    if not func_exists:
+                        funcs_to_add.append(func_info)
+                else:
+                    # 非 weak 函数，直接添加到临时列表
+                    funcs_to_add.append(func_info)
+            
+            # 统一处理添加函数到调用图和文件信息
+            # 为启动文件生成一个全新的 file_info
+            startup_file_info = {
+                "file": startup_file_path,
+                "functions": [],
+                "includes": []
+            }
+            
+            for func_info in funcs_to_add:
+                func_name = func_info["name"]
+                # 构造完整的函数键
+                full_func_key = f"{startup_file_path}:{func_name}"
+                
+                # 添加到调用图
+                full_call_graph[full_func_key] = []
+                
+                # 直接添加到启动文件的函数列表中，无需检查是否已存在
+                startup_file_info["functions"].append({
+                    "name": func_name,
+                    "definded_in": startup_file_path,
+                    "start_line": -1,
+                    "end_line": -1
+                })
+            
+            # 更新 file_infos
+            file_infos[startup_file_path] = startup_file_info
+            
+            # 处理入口函数及其调用关系
+            entry_function = startup_data.get("entry_function")
+            entry_function_calls = startup_data.get("entry_function_calls", [])
+            
+            if entry_function:
+                # 构造入口函数的完整键
+                entry_func_key = f"{startup_file_path}:{entry_function}"
+                
+                # 确保入口函数在调用图中存在
+                if entry_func_key not in full_call_graph:
+                    full_call_graph[entry_func_key] = []
+                    # 直接添加入口函数到启动文件的函数列表中，无需检查是否已存在
+                    file_infos[startup_file_path]["functions"].append({
+                        "name": entry_function,
+                        "definded_in": startup_file_path,
+                        "start_line": -1,
+                        "end_line": -1
+                    })
+
+                # 添加入口函数调用的函数
+                for called_func in entry_function_calls:
+                    full_call_graph[entry_func_key].append(called_func)
+        else:
+            print(f"Startup analysis result file not found: {startup_analysis_path}")
+    except Exception as e:
+        error(f"Loading startup analysis result: {e}")
+
 def main(argv=None):
     if argv is None:
         argv = sys.argv[1:]
@@ -1847,7 +1938,10 @@ def main(argv=None):
     for func_name, calls in full_call_graph.items():
         full_call_graph[func_name] = list(set(calls))
 
-    # 解析调用图用于显示和保存
+    # 加载启动分析结果并更新调用图和文件信息
+    load_startup_analysis_result(full_call_graph, file_infos, output_dir, project_name)
+
+    # 解析调用图绑定函数调的函数所在的文件，用于显示和保存
     full_call_graph = resolve_call_graph(full_call_graph)
     
     # 保存全局调用树（只保存全局的，不保存每个文件的）
