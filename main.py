@@ -157,11 +157,35 @@ def generate_global_var_docs(project_dir, args):
         sys.argv = original_argv
 
 
+def parse_startup(project_dir, args):
+    """运行启动文件解析功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入parse_startup模块
+    from codedatasetmaker import parse_startup
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['parse_startup.py', project_dir] + args
+    
+    try:
+        # 运行启动文件解析功能
+        parse_startup.main()
+    except Exception as e:
+        error(f"启动文件解析功能执行出错: {e}")
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档) 或 g_doc(生成全局变量文档) (默认: analyze)')
+    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc', 'startup'], default='analyze',
+                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档)、g_doc(生成全局变量文档) 或 startup(解析启动文件) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -169,6 +193,12 @@ def main():
     
     # 根据模式调用不同功能
     if args.mode == 'analyze':
+        # 将未知参数传递给启动文件解析功能
+        startup_args = unknown_args[:]
+        if args.output:
+            startup_args.extend(['--output', args.output])
+        parse_startup(args.project_dir, startup_args)
+
         # 将未知参数传递给分析功能
         analyze_args = unknown_args[:]
         if args.output:
@@ -209,6 +239,12 @@ def main():
         if args.output:
             g_doc_args.extend(['--output', args.output])
         generate_global_var_docs(args.project_dir, g_doc_args)
+    elif args.mode == 'startup':
+        # 将未知参数传递给启动文件解析功能
+        startup_args = unknown_args[:]
+        if args.output:
+            startup_args.extend(['--output', args.output])
+        parse_startup(args.project_dir, startup_args)
 
 
 if __name__ == "__main__":
