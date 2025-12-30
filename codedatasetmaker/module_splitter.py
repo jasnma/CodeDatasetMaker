@@ -9,6 +9,8 @@ from collections import defaultdict
 
 # 导入日志模块
 from . import debug, info, warning, error, critical
+# 导入工具函数
+from .utils import load_json_file as utils_load_json_file
 
 
 def load_json_file(file_path):

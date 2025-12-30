@@ -30,6 +30,29 @@ brew install llvm
 sudo apt-get install llvm-dev libclang-dev
 ```
 
+## 环境变量配置
+
+为了安全起见，建议将API密钥存储在环境变量中，而不是直接写在配置文件里。
+
+1. 复制 `.env.example` 文件并重命名为 `.env`：
+   ```bash
+   cp .env.example .env
+   ```
+
+2. 编辑 `.env` 文件，填入您的实际API密钥：
+   ```
+   OPENAI_API_KEY=your_actual_api_key_here
+   ```
+
+3. 在运行工具之前，确保加载环境变量：
+   ```bash
+   source .env  # Linux/macOS
+   # 或者
+   .env         # Windows
+   ```
+
+工具会优先使用环境变量中的 `OPENAI_API_KEY`，如果未设置才会从 `ai_config.json` 文件中读取。
+
 ## 使用方法
 
 ### 生成代码分析数据（默认模式）

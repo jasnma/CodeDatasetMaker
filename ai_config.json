@@ -1,5 +1,5 @@
 {
-  "api_key": "sk-6f9c85a8b0034fae92ac68b0a3f72df2",
+  "api_key": "your_api_key_here",
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "model": "qwen3-coder-480b-a35b-instruct",
   "temperature": 0.5,
