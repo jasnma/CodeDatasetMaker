@@ -1384,71 +1384,41 @@ def would_create_cycle(parent_node, child_node):
 
 def save_text_tree(call_graph, output_dir, project_name):
     """根据函数调用关系生成全局文本树并保存到文件"""
-    # 创建所有节点
-    nodes = {f: Node(f) for f in call_graph}
-    
-    # 创建一个集合来跟踪已经处理过的父子关系，避免循环引用
-    processed_relations = set()
-    
-    # 处理调用关系
-    for parent, children in call_graph.items():
+    roots = set(call_graph)
+    for _, children in call_graph.items():
         for child in children:
-            # 创建一个元组表示父子关系
-            relation = (parent, child)
-            # 如果这个关系已经被处理过，跳过以避免循环
-            if relation in processed_relations:
-                continue
-            
-            if child in nodes:
-                # 检查是否会形成循环引用
-                if not would_create_cycle(nodes[parent], nodes[child]):
-                    # 直接连接，因为child已经是完整的键
-                    nodes[child].parent = nodes[parent]
-                    processed_relations.add(relation)
-            else:
-                # 如果child不在nodes中，可能是未定义的函数或格式问题
-                # 检查是否是函数名（不包含路径）
-                if ':' not in child:
-                    # 尝试查找匹配的函数名
-                    child_found = False
-                    for node_key in nodes:
-                        if ':' in node_key:
-                            node_func_name = node_key.split(':', 1)[1]
-                            if node_func_name == child:
-                                # 检查是否会形成循环引用
-                                if not would_create_cycle(nodes[parent], nodes[node_key]):
-                                    nodes[node_key].parent = nodes[parent]
-                                    processed_relations.add((parent, node_key))
-                                child_found = True
-                                break
-                    if not child_found:
-                        new_child_key = f"unknown:{child}"
-                        if new_child_key not in nodes:
-                            nodes[new_child_key] = Node(new_child_key)
-                        # 检查是否会形成循环引用
-                        if not would_create_cycle(nodes[parent], nodes[new_child_key]):
-                            nodes[new_child_key].parent = nodes[parent]
-                            processed_relations.add((parent, new_child_key))
-                else:
-                    # child包含路径但不在nodes中
-                    new_child_key = child
-                    if new_child_key not in nodes:
-                        nodes[new_child_key] = Node(new_child_key)
-                    # 检查是否会形成循环引用
-                    if not would_create_cycle(nodes[parent], nodes[new_child_key]):
-                        nodes[new_child_key].parent = nodes[parent]
-                        processed_relations.add((parent, new_child_key))
-    
-    # 找根节点：没有父节点的节点
-    roots = [key for key, node in nodes.items() if node.parent is None]
+            roots.discard(child)
+
+    root_nodes = []
+    def procressFunction(fuction, parents = set()):
+        node = None
+        if fuction in parents:
+            # 这是循环引用了
+            return node
+
+        if fuction in call_graph:
+            node = Node(fuction)
+            parents.add(fuction)
+            children = call_graph[fuction]
+            for child in children:
+                child_node = procressFunction(child)
+                if child_node:
+                    child_node.parent = node
+            parents.discard(fuction)
+
+        return node
+
+    for root in roots:
+        node = procressFunction(root)
+        if node:
+            root_nodes.append(node)
 
     # 保存到文件
     text_tree_content = "Text Tree: Global Project\n"
-    for root in roots:
-        if root in nodes:
-            for pre, _, node in RenderTree(nodes[root]):
-                text_tree_content += pre + node.name + "\n"
-    
+    for root in root_nodes:
+        for pre, _, node in RenderTree(root):
+            text_tree_content += pre + node.name + "\n"
+
     project_output_dir = os.path.join(output_dir, project_name)
     os.makedirs(project_output_dir, exist_ok=True)
     file_name = os.path.join(project_output_dir, "call_text_tree.txt")
