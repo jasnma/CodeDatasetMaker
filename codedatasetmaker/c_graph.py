@@ -1424,7 +1424,7 @@ def save_text_tree(call_graph, output_dir, project_name):
     file_name = os.path.join(project_output_dir, "call_text_tree.txt")
     with open(file_name, "w") as f:
         f.write(text_tree_content)
-    print(f"Text tree saved to {file_name}")
+    info(f"Text tree saved to {file_name}")
 
 def save_file_info_json(file_infos, output_dir, project_name, project_dir):
     """保存文件信息为JSON"""
@@ -1443,7 +1443,7 @@ def save_file_info_json(file_infos, output_dir, project_name, project_dir):
     file_name = os.path.join(project_output_dir, "file_info.json")
     with open(file_name, "w") as f:
         json.dump(simplified_file_infos, f, indent=2)
-    print(f"File info saved to {file_name}")
+    info(f"File info saved to {file_name}")
     
     # 生成项目文件树
     generate_project_tree(project_dir, project_output_dir)
@@ -1457,7 +1457,7 @@ def generate_project_tree(project_dir, output_dir):
     file_name = os.path.join(output_dir, "project_tree.txt")
     generate_file_tree.save_to_text(file_tree, file_name)
 
-    print(f"Project tree saved to {file_name}")
+    info(f"Project tree saved to {file_name}")
 
 def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
     """保存结构体信息为JSON"""
@@ -1521,7 +1521,7 @@ def save_struct_info_json(struct_fields, struct_uses, output_dir, project_name):
     
     with open(file_name, "w") as f:
         json.dump(struct_list, f, indent=2)
-    print(f"Struct info saved to {file_name}")
+    info(f"Struct info saved to {file_name}")
 
 def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
     """保存宏信息为JSON"""
@@ -1657,7 +1657,7 @@ def save_macro_info_json(macro_defs, macro_uses, output_dir, project_name):
     
     with open(file_name, "w") as f:
         json.dump(macro_list, f, indent=2)
-    print(f"Macro info saved to {file_name}")
+    info(f"Macro info saved to {file_name}")
 
 def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, project_name):
     project_output_dir = os.path.join(output_dir, project_name)
@@ -1677,7 +1677,7 @@ def save_global_var_info_json(global_var_defs, global_var_uses, output_dir, proj
     
     with open(file_name, "w") as f:
         json.dump(global_var_list, f, indent=2)
-    print(f"Global variable info saved to {file_name}")
+    info(f"Global variable info saved to {file_name}")
 
 def load_startup_analysis_result(full_call_graph, file_infos, output_dir, project_name):
     """加载启动分析结果并更新调用图和文件信息"""
