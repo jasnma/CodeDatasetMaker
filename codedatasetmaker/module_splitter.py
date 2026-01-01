@@ -451,7 +451,7 @@ def export_module_structure(modules, dependencies, output_dir):
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(module_info, f, indent=2, ensure_ascii=False)
     
-    print(f"\n模块结构已导出到: {output_file}")
+    info(f"\n模块结构已导出到: {output_file}")
 
 
 def main():
@@ -465,7 +465,7 @@ def main():
     if not os.path.isdir(args.project_dir):
         error(f"错误: 项目目录 {args.project_dir} 不存在")
         sys.exit(1)
-    
+
     # 分析模块边界
     modules, dependencies = analyze_module_boundaries(args.project_dir)
     
