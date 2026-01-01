@@ -8,12 +8,10 @@ import json
 import os
 import argparse
 from collections import defaultdict, deque
-from openai import OpenAI
-from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
-from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+from . import logger
+
 # 导入工具函数
 from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
 
@@ -136,8 +134,8 @@ def generate_startup_prompt(call_tree, main_function_content, called_functions_c
                 prompt_template = f.read()
         except FileNotFoundError:
             # 如果都找不到，报错退出
-            error("错误: 找不到启动流程文档提示词模板文件 'startup_doc_prompt_template.txt'")
-            error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
+            logger.error("错误: 找不到启动流程文档提示词模板文件 'startup_doc_prompt_template.txt'")
+            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
             raise
     
     # 准备填充模板的数据
@@ -177,10 +175,10 @@ def generate_startup_doc(project_path, output_dir, project_name, ai_config=None)
     # 查找main函数
     main_function = find_main_function(call_graph)
     if not main_function:
-        error("错误: 未找到main函数")
+        logger.error("错误: 未找到main函数")
         return
     
-    info(f"找到main函数: {main_function}")
+    logger.info(f"找到main函数: {main_function}")
     
     # 构建main函数调用树
     call_tree = build_call_tree(call_graph, main_function)
@@ -201,11 +199,11 @@ def generate_startup_doc(project_path, output_dir, project_name, ai_config=None)
     # 查找主循环函数
     main_loop_function = find_main_loop_function(call_graph, main_function)
     if not main_loop_function:
-        warning("警告: 未找到主循环函数")
+        logger.warning("警告: 未找到主循环函数")
         main_loop_function_file = None
         main_loop_function_name = None
     else:
-        info(f"找到主循环函数: {main_loop_function}")
+        logger.info(f"找到主循环函数: {main_loop_function}")
         parts = main_loop_function.split(":")
         if len(parts) == 2:
             main_loop_function_file, main_loop_function_name = parts
@@ -230,21 +228,21 @@ def generate_startup_doc(project_path, output_dir, project_name, ai_config=None)
     with open(prompt_file_path, "w", encoding="utf-8") as f:
         f.write(prompt)
     
-    info(f"已生成启动流程分析提示词文件: {prompt_file_path}")
+    logger.info(f"已生成启动流程分析提示词文件: {prompt_file_path}")
     
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
-        info("正在调用AI API生成启动流程文档...")
+        logger.info("正在调用AI API生成启动流程文档...")
         response = call_ai_api(prompt, ai_config)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(startup_output_dir, "startup_doc.md")
             if save_ai_response(response, doc_file_path):
-                info(f"已生成启动流程AI文档: {doc_file_path}")
+                logger.info(f"已生成启动流程AI文档: {doc_file_path}")
             else:
-                ai_error("AI API调用成功，但保存启动流程文档时出现问题")
+                logger.ai_error("AI API调用成功，但保存启动流程文档时出现问题")
         else:
-            ai_error("AI API调用失败，将仅保留启动流程提示词文件")
+            logger.ai_error("AI API调用失败，将仅保留启动流程提示词文件")
     
     return prompt_file_path
 
@@ -271,7 +269,7 @@ def main():
     try:
         generate_startup_doc(args.project_path, output_dir, project_name, ai_config)
     except Exception as e:
-        error(f"生成启动流程文档时出错: {e}")
+        logger.error(f"生成启动流程文档时出错: {e}")
 
 
 if __name__ == "__main__":

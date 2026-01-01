@@ -8,7 +8,8 @@ import sys
 from collections import defaultdict
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
+from . import logger
+
 # 导入工具函数
 from .utils import load_json_file as utils_load_json_file
 
@@ -19,10 +20,10 @@ def load_json_file(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        error(f"错误: 找不到文件 {file_path}")
+        logger.error(f"错误: 找不到文件 {file_path}")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        error(f"错误: 解析JSON文件失败 {file_path}: {e}")
+        logger.error(f"错误: 解析JSON文件失败 {file_path}: {e}")
         sys.exit(1)
 
 
@@ -142,16 +143,16 @@ def analyze_module_boundaries(source_dir):
 
     # 检查metadata目录是否存在
     if not os.path.exists(metadata_dir):
-        error(f"错误: 找不到metadata目录 {metadata_dir}")
+        logger.error(f"错误: 找不到metadata目录 {metadata_dir}")
         sys.exit(1)
 
     # 检查文件是否存在
     if not os.path.exists(call_graph_path):
-        error(f"错误: 在目录 {metadata_dir} 中找不到 call_graph.json")
+        logger.error(f"错误: 在目录 {metadata_dir} 中找不到 call_graph.json")
         sys.exit(1)
 
     if not os.path.exists(file_info_path):
-        error(f"错误: 在目录 {metadata_dir} 中找不到 file_info.json")
+        logger.error(f"错误: 在目录 {metadata_dir} 中找不到 file_info.json")
         sys.exit(1)
 
     # 加载JSON文件
@@ -259,7 +260,7 @@ def analyze_module_boundaries(source_dir):
                         local_file_calls[file].add(called_file)
                         local_file_calls[called_file].add(file)  # 添加反向连接
             else:
-                warning(f"File '{file}' not found in file_call_map.")
+                logger.warning(f"File '{file}' not found in file_call_map.")
 
         # 查找该目录中的连通分量（模块），考虑文件大小限制
         file_components = find_connected_components_with_size_limit(files, local_file_calls, file_details, source_dir)
@@ -451,7 +452,7 @@ def export_module_structure(modules, dependencies, output_dir):
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(module_info, f, indent=2, ensure_ascii=False)
     
-    info(f"\n模块结构已导出到: {output_file}")
+    logger.info(f"\n模块结构已导出到: {output_file}")
 
 
 def main():
@@ -463,7 +464,7 @@ def main():
     
     # 验证项目目录是否存在
     if not os.path.isdir(args.project_dir):
-        error(f"错误: 项目目录 {args.project_dir} 不存在")
+        logger.error(f"错误: 项目目录 {args.project_dir} 不存在")
         sys.exit(1)
 
     # 分析模块边界

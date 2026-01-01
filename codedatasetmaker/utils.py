@@ -12,8 +12,7 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
-from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+from . import logger
 
 
 def load_json_file(file_path):
@@ -22,10 +21,10 @@ def load_json_file(file_path):
         with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
-        error(f"错误: 找不到文件 {file_path}")
+        logger.error(f"错误: 找不到文件 {file_path}")
         return None
     except json.JSONDecodeError as e:
-        error(f"错误: JSON解析失败 {file_path}: {e}")
+        logger.error(f"错误: JSON解析失败 {file_path}: {e}")
         return None
 
 
@@ -45,10 +44,10 @@ def load_ai_config(config_path="ai_config.json"):
             
         return config
     except FileNotFoundError:
-        warning(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
+        logger.warning(f"警告: 找不到配置文件 {config_path}，将仅生成提示词文件")
         return None
     except json.JSONDecodeError as e:
-        error(f"错误: JSON解析失败 {config_path}: {e}")
+        logger.error(f"错误: JSON解析失败 {config_path}: {e}")
         return None
 
 
@@ -66,7 +65,7 @@ def call_ai_api(prompt, config):
     
     # 检查必要参数
     if not api_key or api_key == "your_api_key_here":
-        warning("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
+        logger.warning("警告: 配置文件中缺少有效的api_key，将仅生成提示词文件")
         return None
     
     # 创建OpenAI客户端
@@ -103,16 +102,16 @@ def call_ai_api(prompt, config):
         return {"choices": [{"message": {"content": full_response}}]}
         
     except RateLimitError as e:
-        ai_error(f"请求频率过高: {e}")
+        logger.ai_error(f"请求频率过高: {e}")
         return None
     except APIConnectionError as e:
-        ai_error(f"API连接失败: {e}")
+        logger.ai_error(f"API连接失败: {e}")
         return None
     except APIError as e:
-        ai_error(f"API返回错误: {e}")
+        logger.ai_error(f"API返回错误: {e}")
         return None
     except Exception as e:
-        ai_error(f"API请求失败: {e}")
+        logger.ai_error(f"API请求失败: {e}")
         return None
 
 
@@ -136,5 +135,5 @@ def save_ai_response(response, output_path):
                 json.dump(response, f, ensure_ascii=False, indent=2)
             return False
     except Exception as e:
-        error(f"错误: 保存AI响应失败: {e}")
+        logger.error(f"错误: 保存AI响应失败: {e}")
         return False

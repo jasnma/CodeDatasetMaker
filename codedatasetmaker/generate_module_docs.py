@@ -12,8 +12,8 @@ from openai import OpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
-from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+from . import logger
+
 # 导入工具函数
 from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
 
@@ -128,10 +128,10 @@ def extract_duties_and_boundaries_from_file(file_path):
             doc_content = f.read()
         return extract_duties_and_boundaries(doc_content)
     except FileNotFoundError:
-        error(f"文件未找到: {file_path}")
+        logger.error(f"文件未找到: {file_path}")
         return None
     except Exception as e:
-        error(f"读取文件时出错: {e}")
+        logger.error(f"读取文件时出错: {e}")
         return None
 
 
@@ -177,7 +177,7 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     source_code = read_source_files(module_info["files"], project_path)
 
     if not source_code:
-        warning(f"No source code found for module: {module_name}")
+        logger.warning(f"No source code found for module: {module_name}")
         return None
     
     # 构造元数据
@@ -200,8 +200,8 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
                 prompt_template = f.read()
         except FileNotFoundError:
             # 如果都找不到，报错退出
-            error("错误: 找不到模块文档提示词模板文件 'module_doc_prompt_template.txt'")
-            error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
+            logger.error("错误: 找不到模块文档提示词模板文件 'module_doc_prompt_template.txt'")
+            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
             raise
     
     # 填充模板
@@ -225,17 +225,17 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
-        info(f"正在调用AI API生成模块 '{module_name}' 的文档...")
+        logger.info(f"正在调用AI API生成模块 '{module_name}' 的文档...")
         response = call_ai_api(prompt, ai_config)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(module_output_dir, f"{module_name}_doc.md")
             if save_ai_response(response, doc_file_path):
-                info(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
+                logger.info(f"已生成模块 '{module_name}' 的AI文档: {doc_file_path}")
             else:
-                ai_error(f"AI API调用成功，但保存{module_name}文档时出现问题")
+                logger.ai_error(f"AI API调用成功，但保存{module_name}文档时出现问题")
         else:
-            ai_error(f"AI API调用失败，将仅保留{module_name}提示词文件")
+            logger.ai_error(f"AI API调用失败，将仅保留{module_name}提示词文件")
     
     return prompt_file_path
 

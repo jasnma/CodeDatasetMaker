@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 # 导入工具模块
 from .utils import load_ai_config, call_ai_api, save_ai_response
-from . import debug, info, warning, error, critical
+from . import logger
 
 
 def find_startup_file(project_path):
@@ -74,7 +74,7 @@ def find_startup_file(project_path):
                                 if any(keyword in content for keyword in ['Reset_Handler', 'Vector', '__initial_sp']):
                                     return file_path
                         except Exception as e:
-                            warning(f"无法读取文件 {file_path}: {e}")
+                            logger.warning(f"无法读取文件 {file_path}: {e}")
     
     return None
 
@@ -187,7 +187,7 @@ def parse_config_for_startup(config_file):
                 if match:
                     return match.group(2)
     except Exception as e:
-        warning(f"解析配置文件 {config_file} 时出错: {e}")
+        logger.warning(f"解析配置文件 {config_file} 时出错: {e}")
     
     return None
 
@@ -211,7 +211,7 @@ def extract_startup_info(startup_file_path):
             "startup_file": startup_file_path
         }
     except Exception as e:
-        error(f"提取启动文件信息时出错: {e}")
+        logger.error(f"提取启动文件信息时出错: {e}")
         return None
 
 
@@ -382,20 +382,20 @@ def main(project_path=None):
             print(f"错误: 项目路径不存在: {project_path}")
             sys.exit(1)
     
-    info(f"正在分析项目Startup: {project_path}")
+    logger.info(f"正在分析项目Startup: {project_path}")
     
     # 查找启动文件
     startup_file = find_startup_file(project_path)
     if not startup_file:
-        error("未找到启动文件")
+        logger.error("未找到启动文件")
         return False
     
-    info(f"找到启动文件: {startup_file}")
+    logger.info(f"找到启动文件: {startup_file}")
     
     # 提取启动文件信息
     startup_info = extract_startup_info(startup_file)
     if not startup_info:
-        error("无法提取启动文件信息")
+        logger.error("无法提取启动文件信息")
         return False
     
     # 生成AI提示词
@@ -414,7 +414,7 @@ def main(project_path=None):
 
     result_file = os.path.join(project_output_dir, 'startup_analysis_result.json')
     if os.path.exists(result_file):
-        info(f"Result file {result_file} already exists. Skipping analysis.")
+        logger.info(f"Result file {result_file} already exists. Skipping analysis.")
         return True
 
     # 加载AI配置
@@ -424,27 +424,27 @@ def main(project_path=None):
         prompt_file = os.path.join(project_output_dir, 'startup_analysis_prompt.txt')
         with open(prompt_file, 'w', encoding='utf-8') as f:
             f.write(prompt)
-        info(f"已生成提示词文件: {prompt_file}")
+        logger.info(f"已生成提示词文件: {prompt_file}")
         return True
 
     # 调用AI API
-    info("正在调用AI分析...")
+    logger.info("正在调用AI分析...")
     response = call_ai_api(prompt, ai_config)
 
     # 保存AI响应
     if response:
         success = save_ai_response(response, result_file)
         if success:
-            info(f"已保存AI分析结果: {result_file}")
+            logger.info(f"已保存AI分析结果: {result_file}")
         else:
-            error("保存AI分析结果失败")
+            logger.error("保存AI分析结果失败")
             return False
     else:
-        warning("AI分析失败，只保存提示词")
+        logger.warning("AI分析失败，只保存提示词")
         prompt_file = os.path.join(project_output_dir, 'startup_analysis_prompt.txt')
         with open(prompt_file, 'w', encoding='utf-8') as f:
             f.write(prompt)
-        info(f"已生成提示词文件: {prompt_file}")
+        logger.info(f"已生成提示词文件: {prompt_file}")
 
     return True
 

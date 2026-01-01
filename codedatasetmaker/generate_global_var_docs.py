@@ -14,8 +14,8 @@ from openai import APIError, APIConnectionError, RateLimitError
 from .c_parser_utils import find_doc_comment_start
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
-from . import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+from . import logger
+
 # 导入工具函数
 from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
 
@@ -31,7 +31,7 @@ def read_var_definition_from_source(project_path, defined_in, var_name):
 
         # 如果仍然没有找到文件，返回None
         if not os.path.exists(file_path):
-            warning(f"警告: 找不到源文件 {file_path}")
+            logger.warning(f"警告: 找不到源文件 {file_path}")
             return None
 
         # 读取文件内容
@@ -65,7 +65,7 @@ def read_var_definition_from_source(project_path, defined_in, var_name):
             
         return None
     except Exception as e:
-        error(f"读取源文件时出错: {e}")
+        logger.error(f"读取源文件时出错: {e}")
         return None
 
 
@@ -77,7 +77,7 @@ def read_function_definition_from_source(project_path, defined_in, start_line, e
 
         # 如果仍然没有找到文件，返回None
         if not os.path.exists(file_path):
-            warning(f"警告: 找不到源文件 {file_path}")
+            logger.warning(f"警告: 找不到源文件 {file_path}")
             return None
 
         # 读取文件内容
@@ -101,7 +101,7 @@ def read_function_definition_from_source(project_path, defined_in, start_line, e
         
         return function_definition.strip()
     except Exception as e:
-        error(f"读取源文件时出错: {e}")
+        logger.error(f"读取源文件时出错: {e}")
         return None
 
 
@@ -125,7 +125,7 @@ def load_fileinfo_data(project_path):
     
     # 如果找不到fileinfo.json，返回空列表
     if not os.path.exists(fileinfo_path):
-        warning(f"警告: 找不到fileinfo.json文件")
+        logger.warning(f"警告: 找不到fileinfo.json文件")
         return []
     
     # 读取fileinfo.json
@@ -133,7 +133,7 @@ def load_fileinfo_data(project_path):
         with open(fileinfo_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     except Exception as e:
-        error(f"读取fileinfo.json时出错: {e}")
+        logger.error(f"读取fileinfo.json时出错: {e}")
         return []
 
 
@@ -152,8 +152,8 @@ def generate_var_prompt(var_info, project_path, fileinfo_data):
                 prompt_template = f.read()
         except FileNotFoundError:
             # 如果都找不到，报错退出
-            error("错误: 找不到全局变量文档提示词模板文件 'global_var_doc_prompt_template.txt'")
-            error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
+            logger.error("错误: 找不到全局变量文档提示词模板文件 'global_var_doc_prompt_template.txt'")
+            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
             raise
     
     # 获取全局变量名称
@@ -199,9 +199,9 @@ def generate_var_prompt(var_info, project_path, fileinfo_data):
                     if function_code:
                         function_references.append(f"// 函数 {func_ref} :\n{function_code}")
                 except Exception as e:
-                    error(f"读取函数 {func_name} 的源代码时出错: {e}")
+                    logger.error(f"读取函数 {func_name} 的源代码时出错: {e}")
             else:
-                warning(f"未在fileinfo.json中找到函数 {func_name} 的信息")
+                logger.warning(f"未在fileinfo.json中找到函数 {func_name} 的信息")
     
     # 将引用函数代码组合成字符串
     referenced_functions = "\n\n".join(function_references) if function_references else "无"
@@ -228,7 +228,7 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
     var_name = var_info.get("var", "")
     
     if not var_name:
-        error("错误: 无法确定全局变量名称")
+        logger.error("错误: 无法确定全局变量名称")
         return None
     
     if var_name in processed_vars:
@@ -253,7 +253,7 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
     with open(prompt_file_path, "w", encoding="utf-8") as f:
         f.write(prompt)
     
-    info(f"已生成全局变量 '{var_name}' 的文档提示词文件: {prompt_file_path}")
+    logger.info(f"已生成全局变量 '{var_name}' 的文档提示词文件: {prompt_file_path}")
     
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
@@ -263,11 +263,11 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
             # 保存AI生成的文档
             doc_file_path = os.path.join(var_output_dir, doc_file_name)
             if save_ai_response(response, doc_file_path):
-                info(f"已生成全局变量 '{var_name}' 的AI文档: {doc_file_path}")
+                logger.info(f"已生成全局变量 '{var_name}' 的AI文档: {doc_file_path}")
             else:
-                ai_error(f"AI API调用成功，但保存{var_name}文档时出现问题")
+                logger.ai_error(f"AI API调用成功，但保存{var_name}文档时出现问题")
         else:
-            ai_error(f"AI API调用失败，将仅保留{var_name}提示词文件")
+            logger.ai_error(f"AI API调用失败，将仅保留{var_name}提示词文件")
     
     return prompt_file_path
 
@@ -302,11 +302,11 @@ def main():
     
     # 为每个全局变量生成文档
     for var_item in global_var_info:
-        info(f"正在处理全局变量: {var_item.get('var', '未知')}")
+        logger.info(f"正在处理全局变量: {var_item.get('var', '未知')}")
         try:
             generate_var_doc(var_item, project_name, output_dir, ai_config, args.project_path, fileinfo_data)
         except Exception as e:
-            error(f"处理全局变量时出错: {e}")
+            logger.error(f"处理全局变量时出错: {e}")
 
 
 if __name__ == "__main__":

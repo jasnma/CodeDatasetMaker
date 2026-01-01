@@ -5,7 +5,7 @@ import json
 import argparse
 
 # 导入日志模块
-from . import debug, info, warning, error, critical
+from . import logger
 
 def should_ignore_file(filename):
     """判断是否应该忽略该文件"""
@@ -85,7 +85,7 @@ def print_file_tree(tree, prefix="", is_last=True):
         is_last_item = (i == len(tree) - 1)
         current_prefix = "└── " if is_last_item else "├── "
         
-        info(prefix + current_prefix + item["name"])
+        logger.info(prefix + current_prefix + item["name"])
         
         if item["type"] == "directory":
             extension = "    " if is_last_item else "│   "
@@ -127,17 +127,17 @@ def main():
     project_dir = args.project_dir
     
     if not os.path.exists(project_dir):
-        error(f"Error: Directory '{project_dir}' does not exist.")
+        logger.error(f"Error: Directory '{project_dir}' does not exist.")
         return
     
     if not os.path.isdir(project_dir):
-        error(f"Error: '{project_dir}' is not a directory.")
+        logger.error(f"Error: '{project_dir}' is not a directory.")
         return
     
     # 获取项目名称
     project_name = os.path.basename(os.path.abspath(project_dir))
     
-    info(f"Project file tree for: {os.path.abspath(project_dir)}")
+    logger.info(f"Project file tree for: {os.path.abspath(project_dir)}")
     print()
     
     # 生成文件树
@@ -162,13 +162,13 @@ def main():
         # 生成完整的输出路径
         output_file = os.path.join(project_output_dir, args.output)
         save_to_json(file_tree, output_file)
-        info(f"\nFile tree saved to: {output_file}")
+        logger.info(f"\nFile tree saved to: {output_file}")
     else:
         # 默认输出为文本格式
         default_output = "file_tree.txt"
         output_file = os.path.join(project_output_dir, default_output)
         save_to_text(file_tree, output_file)
-        info(f"\nFile tree saved to: {output_file} (default)")
+        logger.info(f"\nFile tree saved to: {output_file} (default)")
 
 if __name__ == "__main__":
     main()

@@ -8,8 +8,7 @@ import argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
 
 # 导入日志模块
-from codedatasetmaker import debug, info, warning, error, critical
-from codedatasetmaker import ai_debug, ai_info, ai_warning, ai_error, ai_critical
+from codedatasetmaker import logger
 
 def analyze_project(project_dir, args):
     """运行代码分析功能"""
@@ -55,7 +54,7 @@ def generate_module_docs(project_dir, args):
         # 运行模块文档生成功能
         generate_module_docs.main()
     except Exception as e:
-        error(f"模块文档生成功能执行出错: {e}")
+        logger.error(f"模块文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -79,7 +78,7 @@ def generate_function_docs(project_dir, args):
         # 运行函数文档生成功能
         generate_function_docs.main()
     except Exception as e:
-        error(f"函数文档生成功能执行出错: {e}")
+        logger.error(f"函数文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -103,7 +102,7 @@ def generate_macro_docs(project_dir, args):
         # 运行宏文档生成功能
         generate_macro_docs.main()
     except Exception as e:
-        error(f"宏文档生成功能执行出错: {e}")
+        logger.error(f"宏文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -127,7 +126,7 @@ def generate_struct_docs(project_dir, args):
         # 运行结构体文档生成功能
         generate_struct_docs.main()
     except Exception as e:
-        error(f"结构体文档生成功能执行出错: {e}")
+        logger.error(f"结构体文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -151,7 +150,7 @@ def generate_global_var_docs(project_dir, args):
         # 运行全局变量文档生成功能
         generate_global_var_docs.main()
     except Exception as e:
-        error(f"全局变量文档生成功能执行出错: {e}")
+        logger.error(f"全局变量文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -175,7 +174,7 @@ def parse_startup(project_dir, args):
         # 运行启动文件解析功能
         parse_startup.main()
     except Exception as e:
-        error(f"启动文件解析功能执行出错: {e}")
+        logger.error(f"启动文件解析功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
@@ -199,7 +198,7 @@ def generate_startup_docs(project_dir, args):
         # 运行启动流程文档生成功能
         generate_startup_docs.main()
     except Exception as e:
-        error(f"启动流程文档生成功能执行出错: {e}")
+        logger.error(f"启动流程文档生成功能执行出错: {e}")
     finally:
         # 恢复原始的sys.argv
         sys.argv = original_argv
