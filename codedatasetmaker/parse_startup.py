@@ -134,6 +134,7 @@ def parse_config_for_startup(config_file):
     Returns:
         str: 启动文件路径，如果未找到则返回None
     """
+
     try:
         if config_file.endswith(('.uvprojx', '.uvproj')):
             # 解析Keil项目文件
@@ -141,25 +142,20 @@ def parse_config_for_startup(config_file):
             root = tree.getroot()
             
             # 查找startup组中的启动文件
-            for group_elem in root.iter('Group'):
-                group_name = group_elem.find('GroupName')
-                if group_name is not None and group_name.text == 'startup':
-                    # 在startup组中查找文件
-                    for file_elem in group_elem.iter('File'):
-                        file_path_elem = file_elem.find('FilePath')
-                        if file_path_elem is not None:
-                            file_path = file_path_elem.text
-                            if file_path and file_path.endswith(('.s', '.S')):
-                                return file_path
-            
-            # 如果没有找到startup组，则查找文件名包含startup的文件
-            for file_elem in root.iter('File'):
-                file_name = file_elem.find('FileName')
-                file_path = file_elem.find('FilePath')
-                
-                if file_name is not None and file_path is not None:
-                    if 'startup' in file_name.text.lower() and file_path.text.endswith(('.s', '.S')):
-                        return file_path.text
+            for targets in root.iter('Targets'):
+                for target in targets.iter('Target'):
+                    for groups in target.iter('Groups'):
+                        for group in groups.iter('Group'):
+                            group_name = group.find('GroupName')
+                            if group_name is not None and group_name.text == 'startup':
+                                # 在startup组中查找文件
+                                for files_elem in group.iter('Files'):
+                                    for file_elem in files_elem.iter('File'):
+                                        file_path_elem = file_elem.find('FilePath')
+                                        if file_path_elem is not None:
+                                            file_path = file_path_elem.text
+                                            if file_path and file_path.endswith(('.s', '.S')):
+                                                return file_path.replace('\\', '/')
                         
         elif config_file.endswith('.ewp'):
             # 解析IAR项目文件
