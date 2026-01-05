@@ -239,11 +239,35 @@ def generate_module_train(project_dir, args):
         sys.argv = original_argv
 
 
+def generate_struct_train(project_dir, args):
+    """运行结构体训练样本生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_struct_train模块
+    from codedatasetmaker import generate_struct_train
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_struct_train.py', project_dir] + args
+    
+    try:
+        # 运行结构体训练样本生成功能
+        generate_struct_train.main()
+    except Exception as e:
+        logger.error(f"结构体训练样本生成功能执行出错: {e}")
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc', 'startup', 'startup_doc', 'startup_train', 'module_train'], default='analyze',
-                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档)、g_doc(生成全局变量文档)、startup(解析启动文件)、startup_doc(生成启动流程文档)、startup_train(生成启动流程训练样本) 或 module_train(生成模块训练样本) (默认: analyze)')
+    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc', 'startup', 'startup_doc', 'startup_train', 'module_train', 'struct_train'], default='analyze',
+                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档)、g_doc(生成全局变量文档)、startup(解析启动文件)、startup_doc(生成启动流程文档)、startup_train(生成启动流程训练样本)、module_train(生成模块训练样本) 或 struct_train(生成结构体训练样本) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -321,6 +345,12 @@ def main():
         if args.output:
             module_train_args.extend(['--output', args.output])
         generate_module_train(args.project_dir, module_train_args)
+    elif args.mode == 'struct_train':
+        # 将未知参数传递给结构体训练样本生成功能
+        struct_train_args = unknown_args[:]
+        if args.output:
+            struct_train_args.extend(['--output', args.output])
+        generate_struct_train(args.project_dir, struct_train_args)
 
 
 if __name__ == "__main__":
