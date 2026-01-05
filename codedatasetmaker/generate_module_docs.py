@@ -251,7 +251,7 @@ def main():
     # 计算项目名称和相关路径
     project_name = os.path.basename(os.path.abspath(args.project_path))
     if args.output:
-        output_dir = args.output
+        output_dir = os.path.join(args.output, project_name)
     else:
         output_dir = os.path.join("output", project_name)
     

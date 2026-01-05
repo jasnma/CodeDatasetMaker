@@ -5,7 +5,7 @@
 启动文件解析模块
 用于解析ARM Cortex-M系列微控制器的启动文件，提取中断向量表、入口函数等信息
 """
-
+import argparse
 import os
 import sys
 import json
@@ -361,23 +361,20 @@ def generate_ai_prompt(startup_info):
     return prompt
 
 
-def main(project_path=None):
-    """
-    主函数
-    
-    Args:
-        project_path (str): 项目路径
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
         
-    Returns:
-        bool: 执行成功返回True，否则返回False
-    """
+    parser = argparse.ArgumentParser(description='Generate function call graph for C project')
+    parser.add_argument('project_dir', help='Path to the C project directory')
+    parser.add_argument('--output', '-o', help='Output directory path')
+    args = parser.parse_args(argv)
+
+    project_path = args.project_dir
+    output_dir = args.output or "output"
+
     # 如果没有提供项目路径，则从命令行参数获取
     if project_path is None:
-        if len(sys.argv) < 2:
-            print("用法: python parse_startup.py <项目路径>")
-            sys.exit(1)
-        
-        project_path = sys.argv[1]
         if not os.path.exists(project_path):
             print(f"错误: 项目路径不存在: {project_path}")
             sys.exit(1)
@@ -402,7 +399,6 @@ def main(project_path=None):
     prompt = generate_ai_prompt(startup_info)
     
     # 确保output目录存在
-    output_dir = 'output'
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 

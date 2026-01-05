@@ -9,6 +9,9 @@ CodeDatasetMaker 是一个专门用于分析嵌入式C项目的工具，它可�
 - 提取宏定义和全局变量信息
 - 生成项目文件树
 - 支持Keil和Eclipse CDT项目文件解析
+- 模块分割分析
+- 模块文档生成
+- 模块训练样本生成（Q&A格式）
 
 ## 安装依赖
 
@@ -103,6 +106,34 @@ python3 codedatasetmaker/generate_module_docs.py <项目路径>
 
 这将在 `output/<项目名>/modules/` 目录下生成每个模块的文档提示词文件，这些文件包含了模块的源代码和元数据信息，可以提供给AI生成详细的模块文档。
 
+### 模块训练样本生成
+
+在生成模块文档后，可以通过主脚本以module_train模式运行模块训练样本生成工具：
+
+```bash
+python3 main.py --mode module_train <项目路径>
+```
+
+例如：
+
+```bash
+python3 main.py --mode module_train test_project
+```
+
+或者生成特定模块的训练样本：
+
+```bash
+python3 main.py --mode module_train test_project --module A0_main
+```
+
+也可以直接运行 `codedatasetmaker` 目录下的脚本：
+
+```bash
+python3 codedatasetmaker/generate_module_train.py <项目路径>
+```
+
+这将在 `output/<项目名>/train/modules/` 目录下生成每个模块的训练样本提示词文件，如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件。
+
 ### 直接运行脚本
 
 你也可以直接运行 `codedatasetmaker` 目录下的脚本：
@@ -124,10 +155,15 @@ python3 module_splitter.py <项目路径>
 - `struct_info.json`: 结构体、联合体和枚举信息
 - `macro_info.json`: 宏定义信息
 - `global_var_info.json`: 全局变量信息
+- `module_structure.json`: 模块结构信息
 
 ### 模块文档生成
 
 使用 `generate_module_docs.py` 脚本可以为项目中的每个模块生成文档提示词文件，这些文件位于 `output/<项目名>/modules/` 目录下，可以提供给AI生成详细的模块文档。
+
+### 模块训练样本生成
+
+使用 `generate_module_train.py` 脚本可以为项目中的每个模块生成训练样本提示词文件，这些文件位于 `output/<项目名>/train/modules/` 目录下。如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件（`.md`格式），用于大模型微调。
 
 ## 项目结构
 

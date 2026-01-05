@@ -132,10 +132,10 @@ def find_connected_components_with_size_limit(files, file_calls, file_details, s
     
     return components
 
-def analyze_module_boundaries(source_dir):
+def analyze_module_boundaries(source_dir, output_dir):
     """分析模块边界"""
     # 构建metadata目录路径
-    metadata_dir = os.path.join('output', os.path.basename(source_dir))
+    metadata_dir = output_dir
 
     # 构建文件路径
     call_graph_path = os.path.join(metadata_dir, 'call_graph.json')
@@ -467,19 +467,21 @@ def main():
         logger.error(f"错误: 项目目录 {args.project_dir} 不存在")
         sys.exit(1)
 
-    # 分析模块边界
-    modules, dependencies = analyze_module_boundaries(args.project_dir)
-    
-    # 打印分析结果
-    print_module_analysis(modules, dependencies)
     
     # 确定输出目录
     if args.output:
-        output_dir = args.output
+        project_name = os.path.basename(args.project_dir)
+        output_dir = os.path.join(args.output, project_name)
     else:
         # 默认输出目录为 output/{project_name}
         project_name = os.path.basename(args.project_dir)
         output_dir = os.path.join('output', project_name)
+
+    # 分析模块边界
+    modules, dependencies = analyze_module_boundaries(args.project_dir, output_dir)
+    
+    # 打印分析结果
+    print_module_analysis(modules, dependencies)
     
     # 导出结果
     export_module_structure(modules, dependencies, output_dir)

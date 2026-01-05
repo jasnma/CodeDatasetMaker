@@ -1778,13 +1778,17 @@ def main(argv=None):
         
     parser = argparse.ArgumentParser(description='Generate function call graph for C project')
     parser.add_argument('project_dir', help='Path to the C project directory')
+    parser.add_argument('--output', '-o', help='Output directory path')
     args = parser.parse_args(argv)
 
     project_dir = args.project_dir
     # 获取项目目录名
     project_name = os.path.basename(os.path.abspath(project_dir))
     # 创建输出目录
-    output_dir = "output"
+    if args.output:
+        output_dir = args.output
+    else:
+        output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
 
     # 从项目文件中提取包含路径
