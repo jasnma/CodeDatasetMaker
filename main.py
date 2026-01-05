@@ -204,11 +204,35 @@ def generate_startup_docs(project_dir, args):
         sys.argv = original_argv
 
 
+def generate_startup_train(project_dir, args):
+    """运行启动流程训练样本生成功能"""
+    # 添加codedatasetmaker目录到Python路径
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'codedatasetmaker'))
+    
+    # 导入generate_startup_train模块
+    from codedatasetmaker import generate_startup_train
+    
+    # 保存原始的sys.argv
+    original_argv = sys.argv[:]
+    
+    # 设置新的sys.argv
+    sys.argv = ['generate_startup_train.py', project_dir] + args
+    
+    try:
+        # 运行启动流程训练样本生成功能
+        generate_startup_train.main()
+    except Exception as e:
+        logger.error(f"启动流程训练样本生成功能执行出错: {e}")
+    finally:
+        # 恢复原始的sys.argv
+        sys.argv = original_argv
+
+
 def main():
     parser = argparse.ArgumentParser(description='CodeDatasetMaker - C/C++项目分析工具')
     parser.add_argument('project_dir', help='项目目录路径')
-    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc', 'startup', 'startup_doc'], default='analyze',
-                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档)、g_doc(生成全局变量文档)、startup(解析启动文件) 或 startup_doc(生成启动流程文档) (默认: analyze)')
+    parser.add_argument('--mode', '-m', choices=['analyze', 'doc', 'f_doc', 'm_doc', 's_doc', 'g_doc', 'startup', 'startup_doc', 'startup_train'], default='analyze',
+                        help='运行模式: analyze(代码分析)、doc(生成模块文档)、f_doc(生成函数文档)、m_doc(生成宏文档)、s_doc(生成结构体文档)、g_doc(生成全局变量文档)、startup(解析启动文件)、startup_doc(生成启动流程文档) 或 startup_train(生成启动流程训练样本) (默认: analyze)')
     parser.add_argument('--output', '-o', help='输出目录路径')
     
     # 解析已知参数
@@ -274,6 +298,12 @@ def main():
         if args.output:
             startup_doc_args.extend(['--output', args.output])
         generate_startup_docs(args.project_dir, startup_doc_args)
+    elif args.mode == 'startup_train':
+        # 将未知参数传递给启动流程训练样本生成功能
+        startup_train_args = unknown_args[:]
+        if args.output:
+            startup_train_args.extend(['--output', args.output])
+        generate_startup_train(args.project_dir, startup_train_args)
 
 
 if __name__ == "__main__":

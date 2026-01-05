@@ -2,6 +2,7 @@
   "api_key": "your_api_key_here",
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "model": "qwen3-coder-480b-a35b-instruct",
+  "train_model": "qwen3-max",
   "temperature": 0.5,
   "max_tokens": 6000,
   "top_p": 1.0,
