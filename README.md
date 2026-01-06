@@ -12,8 +12,14 @@ CodeDatasetMaker 是一个专门用于分析嵌入式C项目的工具，它可�
 - 模块分割分析
 - 模块文档生成
 - 结构体文档生成
+- 函数文档生成
+- 宏定义文档生成
+- 全局变量文档生成
 - 模块训练样本生成（Q&A格式）
 - 结构体训练样本生成（Q&A格式）
+- 函数训练样本生成（Q&A格式，包含源代码）
+- 宏定义训练样本生成（Q&A格式，包含源代码）
+- 全局变量训练样本生成（Q&A格式）
 
 ## 安装依赖
 
@@ -164,6 +170,90 @@ python3 codedatasetmaker/generate_struct_train.py <项目路径>
 
 这将在 `output/<项目名>/train/structs/` 目录下生成每个结构体的训练样本提示词文件，如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件。
 
+### 函数训练样本生成
+
+在生成函数文档后，可以通过主脚本以function_train模式运行函数训练样本生成工具：
+
+```bash
+python3 main.py --mode function_train <项目路径>
+```
+
+例如：
+
+```bash
+python3 main.py --mode function_train test_project
+```
+
+或者生成特定函数的训练样本：
+
+```bash
+python3 main.py --mode function_train test_project --function src/main.c:main
+```
+
+也可以直接运行 `codedatasetmaker` 目录下的脚本：
+
+```bash
+python3 codedatasetmaker/generate_function_train.py <项目路径>
+```
+
+这将在 `output/<项目名>/train/functions/` 目录下生成每个函数的训练样本提示词文件，提示词文件中包含了函数的源代码。如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件。
+
+### 全局变量训练样本生成
+
+在生成全局变量文档后，可以通过主脚本以global_var_train模式运行全局变量训练样本生成工具：
+
+```bash
+python3 main.py --mode global_var_train <项目路径>
+```
+
+例如：
+
+```bash
+python3 main.py --mode global_var_train test_project
+```
+
+或者生成特定全局变量的训练样本：
+
+```bash
+python3 main.py --mode global_var_train test_project --var g_system_state
+```
+
+也可以直接运行 `codedatasetmaker` 目录下的脚本：
+
+```bash
+python3 codedatasetmaker/generate_global_var_train.py <项目路径>
+```
+
+这将在 `output/<项目名>/train/global_vars/` 目录下生成每个全局变量的训练样本提示词文件，如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件。
+
+### 宏定义训练样本生成
+
+在生成宏定义文档后，可以通过主脚本以macro_train模式运行宏定义训练样本生成工具：
+
+```bash
+python3 main.py --mode macro_train <项目路径>
+```
+
+例如：
+
+```bash
+python3 main.py --mode macro_train test_project
+```
+
+或者生成特定宏定义的训练样本：
+
+```bash
+python3 main.py --mode macro_train test_project --macro MAX_BUFFER_SIZE:include/config.h
+```
+
+也可以直接运行 `codedatasetmaker` 目录下的脚本：
+
+```bash
+python3 codedatasetmaker/generate_macro_train.py <项目路径>
+```
+
+这将在 `output/<项目名>/train/macros/` 目录下生成每个宏定义的训练样本提示词文件，提示词文件中包含了宏定义的源代码。如果提供了有效的AI配置，还会生成完整的Q&A格式训练样本文件。
+
 ### 直接运行脚本
 
 你也可以直接运行 `codedatasetmaker` 目录下的脚本：
@@ -203,18 +293,30 @@ python3 module_splitter.py <项目路径>
 
 ```
 codedatasetmaker/
-├── c_graph.py                    # 主要的分析脚本
-├── generate_file_tree.py         # 生成文件树的脚本
-├── module_splitter.py            # 模块分割脚本
-├── generate_module_docs.py       # 模块文档生成脚本
-├── generate_struct_docs.py       # 结构体文档生成脚本
-├── generate_module_train.py      # 模块训练样本生成脚本
-├── generate_struct_train.py      # 结构体训练样本生成脚本
-├── module_doc_prompt_template.txt # 模块文档提示词模板
-├── struct_doc_prompt_template.txt # 结构体文档提示词模板
-├── module_train_prompt_template.txt # 模块训练样本提示词模板
-├── struct_train_prompt_template.txt # 结构体训练样本提示词模板
-└── __init__.py                   # Python 包初始化文件
+├── c_graph.py                         # 主要的分析脚本
+├── generate_file_tree.py              # 生成文件树的脚本
+├── module_splitter.py                 # 模块分割脚本
+├── generate_module_docs.py            # 模块文档生成脚本
+├── generate_struct_docs.py            # 结构体文档生成脚本
+├── generate_function_docs.py          # 函数文档生成脚本
+├── generate_macro_docs.py             # 宏定义文档生成脚本
+├── generate_global_var_docs.py        # 全局变量文档生成脚本
+├── generate_module_train.py           # 模块训练样本生成脚本
+├── generate_struct_train.py           # 结构体训练样本生成脚本
+├── generate_function_train.py         # 函数训练样本生成脚本
+├── generate_global_var_train.py       # 全局变量训练样本生成脚本
+├── generate_macro_train.py            # 宏定义训练样本生成脚本
+├── module_doc_prompt_template.txt     # 模块文档提示词模板
+├── struct_doc_prompt_template.txt     # 结构体文档提示词模板
+├── function_doc_prompt_template.txt   # 函数文档提示词模板
+├── global_var_doc_prompt_template.txt # 全局变量文档提示词模板
+├── macro_doc_prompt_template.txt      # 宏定义文档提示词模板
+├── module_train_prompt_template.txt   # 模块训练样本提示词模板
+├── struct_train_prompt_template.txt   # 结构体训练样本提示词模板
+├── function_train_prompt_template.txt # 函数训练样本提示词模板
+├── global_var_train_prompt_template.txt # 全局变量训练样本提示词模板
+├── macro_train_prompt_template.txt    # 宏定义训练样本提示词模板
+└── __init__.py                       # Python 包初始化文件
 
 main.py                 # 主入口脚本
 ai_config.json          # AI访问配置文件

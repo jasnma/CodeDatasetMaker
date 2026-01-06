@@ -3,6 +3,11 @@
   "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
   "model": "qwen3-coder-480b-a35b-instruct",
   "train_model": "qwen3-max",
+  "ingore": [
+    "Device",
+    "Driver",
+    "LibSrc"
+  ],
   "temperature": 0.5,
   "max_tokens": 8000,
   "top_p": 1.0,
