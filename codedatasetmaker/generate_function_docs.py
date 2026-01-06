@@ -15,7 +15,7 @@ from openai import APIError, APIConnectionError, RateLimitError
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
+from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 
 # 定义一个变量记住已经处理过的函数，有些定义在头文件中的函数
@@ -288,6 +288,14 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
     return prompt_file_path
 
 
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="函数文档生成器")
     parser.add_argument("project_path", help="项目路径")
@@ -318,6 +326,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 构建反向调用图
     reverse_call_graph = build_call_graph_reverse(call_graph)
     
@@ -331,6 +342,12 @@ def main():
 
     # 为每个函数生成文档
     for function_name in sorted_functions:
+        # 检查是否应该忽略该函数
+        file_path = function_name.split(":")[0]  # 获取文件路径部分
+        if should_ignore_path(file_path, ignore_dirs):
+            print(f"跳过被忽略目录中的函数: {function_name}")
+            continue
+            
         print(f"正在处理函数: {function_name}")
         try:
             generate_function_doc(function_name, call_graph, reverse_call_graph, file_info, args.project_path, output_dir, project_name, ai_config)

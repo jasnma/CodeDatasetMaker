@@ -14,7 +14,7 @@ from .c_parser_utils import find_doc_comment_start
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
+from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 
 # 定义一个变量记住已经处理过的结构体
@@ -334,6 +334,14 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
     return prompt_file_path
 
 
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="结构体文档生成器")
     parser.add_argument("project_path", help="项目路径")
@@ -359,6 +367,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 加载global_var_info.json数据
     global_var_info_data = load_global_var_info_data(args.project_path)
     
@@ -367,6 +378,13 @@ def main():
     
     # 为每个结构体生成文档
     for struct_item in struct_info:
+        # 检查是否应该忽略该结构体
+        defined_in = struct_item.get("defined_in", "")
+        if should_ignore_path(defined_in, ignore_dirs):
+            struct_name = struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))
+            logger.info(f"跳过被忽略目录中的结构体: {struct_name}")
+            continue
+            
         logger.info(f"正在处理结构体: {struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))}")
         try:
             generate_struct_doc(struct_item, project_name, output_dir, ai_config, args.project_path, global_var_info_data, fileinfo_data)

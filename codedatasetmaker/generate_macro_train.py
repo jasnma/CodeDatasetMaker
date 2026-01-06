@@ -12,8 +12,7 @@ import json
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response
-from .generate_macro_docs import extract_macro_usage_snippets
+from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 def read_macro_doc(project_name, output_dir, defined_in, macro_name):
     """读取宏定义文档文件"""
@@ -196,7 +195,7 @@ def read_macro_info(project_name, output_dir):
         return None
 
 
-def generate_all_macros_train(project_path, output_dir, project_name, ai_config=None):
+def generate_all_macros_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
     """生成所有宏定义的训练样本"""
     # 读取宏定义信息
     macro_info = read_macro_info(project_name, output_dir)
@@ -206,10 +205,15 @@ def generate_all_macros_train(project_path, output_dir, project_name, ai_config=
     # 获取所有宏定义名称和定义位置
     macros = [(item["macro"], item["defined_in"]) for item in macro_info if "macro" in item and "defined_in" in item]
     
-    logger.info(f"开始生成 {len(macros)} 个宏定义的训练样本")
+    logger.info(f"开始生成宏定义的训练样本")
     
     generated_files = []
     for macro_name, defined_in in macros:
+        # 检查是否应该忽略该宏定义
+        if ignore_dirs and should_ignore_path(defined_in, ignore_dirs):
+            logger.info(f"跳过被忽略目录中的宏定义: {macro_name}")
+            continue
+            
         try:
             result = generate_single_macro_train(project_path, output_dir, project_name, defined_in, macro_name, macro_info, ai_config)
             if result:
@@ -220,6 +224,14 @@ def generate_all_macros_train(project_path, output_dir, project_name, ai_config=
     
     logger.info(f"完成生成 {len(generated_files)} 个宏定义的训练样本")
     return generated_files
+
+
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
 
 
 def main():
@@ -241,6 +253,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 生成宏定义训练样本
     try:
         if args.macro:
@@ -249,6 +264,12 @@ def main():
             if len(parts) >= 2:
                 macro_name = parts[0]
                 defined_in = parts[1]
+                
+                # 检查是否应该忽略该宏定义
+                if should_ignore_path(defined_in, ignore_dirs):
+                    logger.info(f"跳过被忽略目录中的宏定义: {args.macro}")
+                    return
+                
                 # 读取宏定义信息
                 macro_info = read_macro_info(project_name, output_dir)
                 # 生成特定宏定义的训练样本
@@ -257,7 +278,7 @@ def main():
                 logger.error("错误: 宏定义格式不正确，应为 '宏名称:定义文件'")
         else:
             # 生成所有宏定义的训练样本
-            generate_all_macros_train(args.project_path, output_dir, project_name, ai_config)
+            generate_all_macros_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
     except Exception as e:
         logger.error(f"生成宏定义训练样本时出错: {e}")
 

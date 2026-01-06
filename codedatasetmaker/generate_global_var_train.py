@@ -12,7 +12,7 @@ import json
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response
+from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 def read_global_var_doc(project_name, output_dir, var_name):
     """读取全局变量文档文件"""
@@ -118,20 +118,29 @@ def read_global_var_info(project_name, output_dir):
         return None
 
 
-def generate_all_global_vars_train(project_path, output_dir, project_name, ai_config=None):
+def generate_all_global_vars_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
     """生成所有全局变量的训练样本"""
     # 读取全局变量信息
     global_var_info = read_global_var_info(project_name, output_dir)
     if global_var_info is None:
         return
     
-    # 获取所有全局变量名称
-    var_names = [item["var"] for item in global_var_info if "var" in item]
-    
-    logger.info(f"开始生成 {len(var_names)} 个全局变量的训练样本")
+    logger.info(f"开始生成全局变量的训练样本")
     
     generated_files = []
-    for var_name in var_names:
+    for item in global_var_info:
+        # 检查是否应该忽略该全局变量
+        defined_in = item.get("defined_in", "")
+        if ignore_dirs and should_ignore_path(defined_in, ignore_dirs):
+            var_name = item.get("var", "未知")
+            logger.info(f"跳过被忽略目录中的全局变量: {var_name}")
+            continue
+            
+        # 获取全局变量名称
+        var_name = item.get("var", "")
+        if not var_name:
+            continue
+            
         try:
             result = generate_single_global_var_train(project_path, output_dir, project_name, var_name, ai_config)
             if result:
@@ -142,6 +151,14 @@ def generate_all_global_vars_train(project_path, output_dir, project_name, ai_co
     
     logger.info(f"完成生成 {len(generated_files)} 个全局变量的训练样本")
     return generated_files
+
+
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
 
 
 def main():
@@ -163,6 +180,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 生成全局变量训练样本
     try:
         if args.var:
@@ -170,7 +190,7 @@ def main():
             generate_single_global_var_train(args.project_path, output_dir, project_name, args.var, ai_config)
         else:
             # 生成所有全局变量的训练样本
-            generate_all_global_vars_train(args.project_path, output_dir, project_name, ai_config)
+            generate_all_global_vars_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
     except Exception as e:
         logger.error(f"生成全局变量训练样本时出错: {e}")
 

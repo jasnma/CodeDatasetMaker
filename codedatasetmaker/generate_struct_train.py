@@ -12,7 +12,7 @@ import json
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response
+from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 
 def read_struct_doc(project_name, output_dir, struct_name):
@@ -128,27 +128,36 @@ def read_struct_info(project_name, output_dir):
         return None
 
 
-def generate_all_structs_train(project_path, output_dir, project_name, ai_config=None):
+def generate_all_structs_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
     """生成所有结构体的训练样本"""
     # 读取结构体信息
     struct_info = read_struct_info(project_name, output_dir)
     if struct_info is None:
         return
     
-    # 获取所有结构体名称
-    struct_names = []
-    for item in struct_info:
-        if "struct" in item:
-            struct_names.append(item["struct"])
-        elif "union" in item:
-            struct_names.append(item["union"])
-        elif "enum" in item:
-            struct_names.append(item["enum"])
-    
-    logger.info(f"开始生成 {len(struct_names)} 个结构体的训练样本")
+    logger.info(f"开始生成结构体的训练样本")
     
     generated_files = []
-    for struct_name in struct_names:
+    for item in struct_info:
+        # 检查是否应该忽略该结构体
+        defined_in = item.get("defined_in", "")
+        if ignore_dirs and should_ignore_path(defined_in, ignore_dirs):
+            struct_name = item.get('struct', item.get('union', item.get('enum', '未知')))
+            logger.info(f"跳过被忽略目录中的结构体: {struct_name}")
+            continue
+            
+        # 获取结构体名称
+        struct_name = ""
+        if "struct" in item:
+            struct_name = item["struct"]
+        elif "union" in item:
+            struct_name = item["union"]
+        elif "enum" in item:
+            struct_name = item["enum"]
+        
+        if not struct_name:
+            continue
+            
         try:
             result = generate_single_struct_train(project_path, output_dir, project_name, struct_name, ai_config)
             if result:
@@ -161,12 +170,20 @@ def generate_all_structs_train(project_path, output_dir, project_name, ai_config
     return generated_files
 
 
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
 def main():
     parser = argparse.ArgumentParser(description="结构体级训练样本生成器")
     parser.add_argument("project_path", help="项目路径")
     parser.add_argument("--output", "-o", help="输出目录路径")
     parser.add_argument("--ai-config", "-c", default="ai_config.json", help="AI配置文件路径")
-    parser.add_argument("--struct", "-s", help="指定生成特定结构体的训练样本（可选）")
+    parser.add_argument("--struct", "-s", help="指定生成特定结构体的训练样本")
     
     args = parser.parse_args()
     
@@ -180,6 +197,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 生成结构体训练样本
     try:
         if args.struct:
@@ -187,7 +207,7 @@ def main():
             generate_single_struct_train(args.project_path, output_dir, project_name, args.struct, ai_config)
         else:
             # 生成所有结构体的训练样本
-            generate_all_structs_train(args.project_path, output_dir, project_name, ai_config)
+            generate_all_structs_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
     except Exception as e:
         logger.error(f"生成结构体训练样本时出错: {e}")
 

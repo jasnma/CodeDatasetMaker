@@ -51,6 +51,16 @@ def load_ai_config(config_path="ai_config.json"):
         return None
 
 
+def get_ignore_dirs(config):
+    """获取忽略目录列表"""
+    if config is None:
+        return []
+    
+    ignore_dirs = config.get("ignore_dirs", [])
+    
+    return ignore_dirs
+
+
 def call_ai_api(prompt, config):
     """使用OpenAI SDK调用AI API并流式输出响应"""
     # 获取配置参数

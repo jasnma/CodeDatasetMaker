@@ -12,7 +12,7 @@ import json
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response
+from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
 
 from .generate_function_docs import read_function_content, find_function_info
 
@@ -146,7 +146,7 @@ def read_call_graph(project_name, output_dir):
         return None
 
 
-def generate_all_functions_train(project_path, output_dir, project_name, ai_config=None):
+def generate_all_functions_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
     """生成所有函数的训练样本"""
     # 读取函数调用图
     call_graph = read_call_graph(project_name, output_dir)
@@ -176,6 +176,9 @@ def generate_all_functions_train(project_path, output_dir, project_name, ai_conf
             if len(parts) >= 2:
                 file_path = parts[0]
                 func_name = parts[1]
+                if should_ignore_path(file_path, ignore_dirs):
+                    logger.info(f"跳过被忽略目录中的函数: {function_name}")
+                    continue
                 result = generate_single_function_train(project_path, output_dir, project_name, file_path, func_name, file_info, ai_config)
                 if result:
                     generated_files.append(result)
@@ -185,6 +188,14 @@ def generate_all_functions_train(project_path, output_dir, project_name, ai_conf
     
     logger.info(f"完成生成 {len(generated_files)} 个函数的训练样本")
     return generated_files
+
+
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
 
 
 def main():
@@ -206,6 +217,9 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
+    # 获取忽略目录列表
+    ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+    
     # 生成函数训练样本
     try:
         if args.function:
@@ -214,6 +228,12 @@ def main():
             if len(parts) >= 2:
                 file_path = parts[0]
                 func_name = parts[1]
+                
+                # 检查是否应该忽略该函数
+                if should_ignore_path(file_path, ignore_dirs):
+                    logger.info(f"跳过被忽略目录中的函数: {args.function}")
+                    return
+                
                 # 读取file_info.json
                 file_info = None
                 try:
@@ -229,7 +249,7 @@ def main():
                 logger.error("错误: 函数名称格式不正确，应为 '文件路径:函数名'")
         else:
             # 生成所有函数的训练样本
-            generate_all_functions_train(args.project_path, output_dir, project_name, ai_config)
+            generate_all_functions_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
     except Exception as e:
         logger.error(f"生成函数训练样本时出错: {e}")
 
