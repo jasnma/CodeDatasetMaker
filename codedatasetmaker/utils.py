@@ -8,7 +8,7 @@
 
 import json
 import os
-from openai import OpenAI
+from openai import OpenAI, AsyncOpenAI
 from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
@@ -59,6 +59,81 @@ def get_ignore_dirs(config):
     ignore_dirs = config.get("ignore_dirs", [])
     
     return ignore_dirs
+
+
+async def async_call_ai_api_stream(
+    prompt,
+    config,
+    semaphore,
+    stream_printer=None,   # 可选：实时输出函数
+):
+    """
+    异步 + 流式 AI 调用
+    - 防止网关超时
+    - 支持实时输出
+    - 支持并发
+    """
+
+    api_key = config.get("api_key")
+    base_url = config.get("base_url", "https://api.openai.com/v1")
+    model = config.get("model")
+    temperature = config.get("temperature", 0.7)
+    max_tokens = config.get("max_tokens", 2000)
+
+    if not api_key or api_key == "your_api_key_here":
+        logger.warning("缺少 api_key，跳过 AI 调用")
+        return None
+
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=base_url,
+    )
+
+    messages = [{"role": "user", "content": prompt}]
+
+    full_response = ""
+
+    async with semaphore:
+        try:
+            stream = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stream=True,
+            )
+
+            async for chunk in stream:
+                if not chunk.choices:
+                    continue
+
+                delta = chunk.choices[0].delta
+                if not delta or not delta.content:
+                    continue
+
+                token = delta.content
+                full_response += token
+
+                # 🔥 实时输出
+                if stream_printer:
+                    stream_printer(token)
+
+            return {
+                "choices": [
+                    {"message": {"content": full_response}}
+                ]
+            }
+
+        except RateLimitError as e:
+            logger.ai_error(f"限流错误: {e}")
+        except APIConnectionError as e:
+            logger.ai_error(f"连接失败: {e}")
+        except APIError as e:
+            logger.ai_error(f"API错误: {e}")
+        except Exception as e:
+            logger.ai_error(f"未知错误: {e}")
+
+    return None
 
 
 def call_ai_api(prompt, config):
