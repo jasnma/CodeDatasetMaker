@@ -7,12 +7,13 @@
 import os
 import argparse
 import json
+import asyncio
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
+from .utils import load_ai_config, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 def read_macro_doc(project_name, output_dir, defined_in, macro_name):
     """读取宏定义文档文件"""
@@ -64,8 +65,40 @@ def generate_macro_train_prompt(macro_doc_content, macro_source_code=None):
     return prompt
 
 
-def generate_single_macro_train(project_path, output_dir, project_name, defined_in, macro_name, macro_info=None, ai_config=None):
-    """生成单个宏定义的训练样本"""
+def read_macro_info(project_name, output_dir):
+    """读取宏定义信息文件"""
+    macro_info_path = os.path.join(output_dir, project_name, "macro_info.json")
+    
+    try:
+        with open(macro_info_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"错误: 找不到宏定义信息文件 {macro_info_path}")
+        return None
+    except Exception as e:
+        logger.error(f"错误: 读取宏定义信息文件失败 {macro_info_path}: {e}")
+        return None
+
+
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
+async def generate_single_macro_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    defined_in,
+    macro_name,
+    macro_info,
+    ai_config,
+    semaphore
+):
+    """异步生成单个宏定义的训练样本"""
     
     # 移除文件扩展名，创建目录结构
     defined_in_no_ext = os.path.splitext(defined_in)[0]
@@ -80,7 +113,7 @@ def generate_single_macro_train(project_path, output_dir, project_name, defined_
     train_file_path = os.path.join(train_output_dir, f"{clean_macro_name}_train.md")
     if os.path.exists(train_file_path):
         logger.info(f"宏定义训练样本已存在，跳过生成：{train_file_path}")
-        return
+        return None
     
     # 读取现有的宏定义文档文件
     macro_doc_content = read_macro_doc(project_name, output_dir, defined_in, macro_name)
@@ -119,119 +152,116 @@ def generate_single_macro_train(project_path, output_dir, project_name, defined_
     with open(prompt_file_path, "w", encoding="utf-8") as f:
         f.write(prompt)
     
-    logger.info(f"已生成宏定义训练样本提示词文件: {prompt_file_path}")
-    
+    logger.info(f"开始生成宏定义训练样本: {macro_name}")
+
     # 如果提供了AI配置，则调用AI API生成训练样本
     if ai_config:
-        logger.info(f"正在调用AI API生成宏定义训练样本: {macro_name}")
-        if ai_config.get("train_model", None):
-            ai_config["model"] = ai_config.get("train_model")
-            
-        response = call_ai_api(prompt, ai_config)
+        response = await async_call_ai_api_stream(
+            prompt,
+            ai_config,
+            semaphore
+        )
+        
         if response:
             # 保存AI生成的训练样本
             if save_ai_response(response, train_file_path):
-                logger.info(f"已生成宏定义训练样本: {train_file_path}")
+                logger.info(f"完成: {macro_name}")
                 return train_file_path
             else:
                 logger.ai_error("AI API调用成功，但保存宏定义训练样本时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留宏定义训练样本提示词文件: {macro_name}")
     
-    return prompt_file_path
+    return None
 
 
-def read_macro_definition_from_source(project_path, defined_in, macro_name):
-    """从源文件中读取宏定义"""
-    try:
-        # 构建完整的文件路径
-        file_path = os.path.join(project_path, defined_in)
+async def macro_worker(
+    queue,
+    project_path,
+    output_dir,
+    project_name,
+    macro_info,
+    ai_config,
+    semaphore
+):
+    """宏定义工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
 
-        # 如果文件不存在，返回None
-        if not os.path.exists(file_path):
-            logger.warning(f"警告: 找不到源文件 {file_path}")
-            return None
-
-        # 读取文件内容
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        
-        # 查找宏定义的位置
-        macro_line_index = -1
-        for i, line in enumerate(lines):
-            # 查找完全匹配宏定义的行
-            if line.strip().startswith(f"#define {macro_name}") or line.strip() == f"#define {macro_name}":
-                macro_line_index = i
-                break
-        
-        if macro_line_index != -1:
-            # 提取宏定义前20行和后100行
-            start_line = max(0, macro_line_index - 20)
-            end_line = min(len(lines), macro_line_index + 101)  # +100行，+1因为切片是左闭右开
-            macro_context_lines = lines[start_line:end_line]
-            macro_context = "".join(macro_context_lines)
-            return macro_context
-        else:
-            # 如果没有找到宏定义，使用默认上下文
-            macro_context = "// 无法找到宏定义位置\n" + "".join(lines[:50])  # 使用前50行作为默认上下文
-            return macro_context
-    except Exception as e:
-        logger.error(f"读取宏定义文件 {file_path} 时出错: {e}")
-        return "// 无法读取文件内容"
+        try:
+            defined_in, macro_name = item
+            await generate_single_macro_train_async(
+                project_path,
+                output_dir,
+                project_name,
+                defined_in,
+                macro_name,
+                macro_info,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
 
 
-def read_macro_info(project_name, output_dir):
-    """读取宏定义信息文件"""
-    macro_info_path = os.path.join(output_dir, project_name, "macro_info.json")
-    
-    try:
-        with open(macro_info_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.error(f"错误: 找不到宏定义信息文件 {macro_info_path}")
-        return None
-    except Exception as e:
-        logger.error(f"错误: 读取宏定义信息文件失败 {macro_info_path}: {e}")
-        return None
-
-
-def generate_all_macros_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
-    """生成所有宏定义的训练样本"""
+async def generate_all_macros_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    ignore_dirs,
+    max_concurrency=5
+):
+    """异步并发生成所有宏定义的训练样本"""
     # 读取宏定义信息
     macro_info = read_macro_info(project_name, output_dir)
-    if macro_info is None:
+    if not macro_info:
         return
-    
-    # 获取所有宏定义名称和定义位置
-    macros = [(item["macro"], item["defined_in"]) for item in macro_info if "macro" in item and "defined_in" in item]
-    
-    logger.info(f"开始生成宏定义的训练样本")
-    
-    generated_files = []
-    for macro_name, defined_in in macros:
+
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency + 2
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            macro_worker(
+                queue,
+                project_path,
+                output_dir,
+                project_name,
+                macro_info,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 逐个投喂宏定义（几乎不占内存）
+    for item in macro_info:
+        macro_name = item.get("macro")
+        defined_in = item.get("defined_in")
+        
+        if not macro_name or not defined_in:
+            continue
+
         # 检查是否应该忽略该宏定义
         if ignore_dirs and should_ignore_path(defined_in, ignore_dirs):
             logger.info(f"跳过被忽略目录中的宏定义: {macro_name}")
             continue
-            
-        try:
-            result = generate_single_macro_train(project_path, output_dir, project_name, defined_in, macro_name, macro_info, ai_config)
-            if result:
-                generated_files.append(result)
-        except Exception as e:
-            logger.error(f"生成宏定义 {macro_name} 的训练样本时出错: {e}")
-            continue
-    
-    logger.info(f"完成生成 {len(generated_files)} 个宏定义的训练样本")
-    return generated_files
 
+        await queue.put((defined_in, macro_name))
 
-def should_ignore_path(file_path, ignore_dirs):
-    """检查文件路径是否应该被忽略"""
-    for ignore_dir in ignore_dirs:
-        if ignore_dir in file_path:
-            return True
-    return False
+    # 等待队列清空
+    await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def main():
@@ -255,6 +285,8 @@ def main():
     
     # 获取忽略目录列表
     ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+
+    max_concurrency = ai_config.get("max_concurrency", 5)
     
     # 生成宏定义训练样本
     try:
@@ -273,12 +305,32 @@ def main():
                 # 读取宏定义信息
                 macro_info = read_macro_info(project_name, output_dir)
                 # 生成特定宏定义的训练样本
-                generate_single_macro_train(args.project_path, output_dir, project_name, defined_in, macro_name, macro_info, ai_config)
+                asyncio.run(
+                    generate_single_macro_train_async(
+                        args.project_path,
+                        output_dir,
+                        project_name,
+                        defined_in,
+                        macro_name,
+                        macro_info,
+                        ai_config,
+                        asyncio.Semaphore(1)
+                    )
+                )
             else:
                 logger.error("错误: 宏定义格式不正确，应为 '宏名称:定义文件'")
         else:
             # 生成所有宏定义的训练样本
-            generate_all_macros_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
+            asyncio.run(
+                generate_all_macros_train_async(
+                    args.project_path,
+                    output_dir,
+                    project_name,
+                    ai_config,
+                    ignore_dirs,
+                    max_concurrency=max_concurrency
+                )
+            )
     except Exception as e:
         logger.error(f"生成宏定义训练样本时出错: {e}")
 

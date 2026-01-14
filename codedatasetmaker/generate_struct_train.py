@@ -82,52 +82,6 @@ def read_struct_info(project_name, output_dir):
         return None
 
 
-def generate_single_struct_train(project_path, output_dir, project_name, struct_name, ai_config=None):
-    """生成单个结构体的训练样本"""
-    
-    # 构建输出目录结构
-    train_output_dir = os.path.join(output_dir, project_name, "train", "structs")
-    os.makedirs(train_output_dir, exist_ok=True)
-
-    train_file_path = os.path.join(train_output_dir, f"{struct_name}_train.md")
-    if os.path.exists(train_file_path):
-        logger.info(f"结构体训练样本已存在，跳过生成：{train_file_path}")
-        return
-    
-    # 读取现有的结构体文档文件
-    struct_doc_content = read_struct_doc(project_name, output_dir, struct_name)
-    if struct_doc_content is None:
-        return None
-    
-    # 生成提示词
-    prompt = generate_struct_train_prompt(struct_doc_content)
-    # 保存提示词到文件
-    prompt_file_path = os.path.join(train_output_dir, f"{struct_name}_train_prompt.txt")
-    with open(prompt_file_path, "w", encoding="utf-8") as f:
-        f.write(prompt)
-    
-    logger.info(f"已生成结构体训练样本提示词文件: {prompt_file_path}")
-    
-    # 如果提供了AI配置，则调用AI API生成训练样本
-    if ai_config:
-        logger.info(f"正在调用AI API生成结构体训练样本: {struct_name}")
-        if ai_config.get("train_model", None):
-            ai_config["model"] = ai_config.get("train_model")
-            
-        response = call_ai_api(prompt, ai_config)
-        if response:
-            # 保存AI生成的训练样本
-            if save_ai_response(response, train_file_path):
-                logger.info(f"已生成结构体训练样本: {train_file_path}")
-                return train_file_path
-            else:
-                logger.ai_error("AI API调用成功，但保存结构体训练样本时出现问题")
-        else:
-            logger.ai_error(f"AI API调用失败，将仅保留结构体训练样本提示词文件: {struct_name}")
-    
-    return prompt_file_path
-
-
 async def generate_single_struct_train_async(
     project_path,
     output_dir,
@@ -140,9 +94,9 @@ async def generate_single_struct_train_async(
     os.makedirs(train_output_dir, exist_ok=True)
 
     train_file_path = os.path.join(train_output_dir, f"{struct_name}_train.md")
-    # if os.path.exists(train_file_path):
-    #     logger.info(f"已存在，跳过：{struct_name}")
-    #     return None
+    if os.path.exists(train_file_path):
+        logger.info(f"已存在，跳过：{struct_name}")
+        return None
 
     struct_doc_content = read_struct_doc(project_name, output_dir, struct_name)
     if not struct_doc_content:
@@ -249,47 +203,6 @@ async def generate_all_structs_train_async(
     for _ in workers:
         await queue.put(None)
     await asyncio.gather(*workers)
-
-def generate_all_structs_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
-    """生成所有结构体的训练样本"""
-    # 读取结构体信息
-    struct_info = read_struct_info(project_name, output_dir)
-    if struct_info is None:
-        return
-    
-    logger.info(f"开始生成结构体的训练样本")
-    
-    generated_files = []
-    for item in struct_info:
-        # 检查是否应该忽略该结构体
-        defined_in = item.get("defined_in", "")
-        if ignore_dirs and should_ignore_path(defined_in, ignore_dirs):
-            struct_name = item.get('struct', item.get('union', item.get('enum', '未知')))
-            logger.info(f"跳过被忽略目录中的结构体: {struct_name}")
-            continue
-            
-        # 获取结构体名称
-        struct_name = ""
-        if "struct" in item:
-            struct_name = item["struct"]
-        elif "union" in item:
-            struct_name = item["union"]
-        elif "enum" in item:
-            struct_name = item["enum"]
-        
-        if not struct_name:
-            continue
-            
-        try:
-            result = generate_single_struct_train(project_path, output_dir, project_name, struct_name, ai_config)
-            if result:
-                generated_files.append(result)
-        except Exception as e:
-            logger.error(f"生成结构体 {struct_name} 的训练样本时出错: {e}")
-            continue
-    
-    logger.info(f"完成生成 {len(generated_files)} 个结构体的训练样本")
-    return generated_files
 
 
 def should_ignore_path(file_path, ignore_dirs):

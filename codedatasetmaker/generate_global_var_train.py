@@ -7,12 +7,13 @@
 import os
 import argparse
 import json
+import asyncio
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
+from .utils import load_ai_config, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 def read_global_var_doc(project_name, output_dir, var_name):
     """读取全局变量文档文件"""
@@ -57,52 +58,6 @@ def generate_global_var_train_prompt(global_var_doc_content):
     return prompt
 
 
-def generate_single_global_var_train(project_path, output_dir, project_name, var_name, ai_config=None):
-    """生成单个全局变量的训练样本"""
-    
-    # 构建输出目录结构
-    train_output_dir = os.path.join(output_dir, project_name, "train", "global_vars")
-    os.makedirs(train_output_dir, exist_ok=True)
-
-    train_file_path = os.path.join(train_output_dir, f"{var_name}_train.md")
-    if os.path.exists(train_file_path):
-        logger.info(f"全局变量训练样本已存在，跳过生成：{train_file_path}")
-        return
-    
-    # 读取现有的全局变量文档文件
-    global_var_doc_content = read_global_var_doc(project_name, output_dir, var_name)
-    if global_var_doc_content is None:
-        return None
-    
-    # 生成提示词
-    prompt = generate_global_var_train_prompt(global_var_doc_content)
-    # 保存提示词到文件
-    prompt_file_path = os.path.join(train_output_dir, f"{var_name}_train_prompt.txt")
-    with open(prompt_file_path, "w", encoding="utf-8") as f:
-        f.write(prompt)
-    
-    logger.info(f"已生成全局变量训练样本提示词文件: {prompt_file_path}")
-    
-    # 如果提供了AI配置，则调用AI API生成训练样本
-    if ai_config:
-        logger.info(f"正在调用AI API生成全局变量训练样本: {var_name}")
-        if ai_config.get("train_model", None):
-            ai_config["model"] = ai_config.get("train_model")
-            
-        response = call_ai_api(prompt, ai_config)
-        if response:
-            # 保存AI生成的训练样本
-            if save_ai_response(response, train_file_path):
-                logger.info(f"已生成全局变量训练样本: {train_file_path}")
-                return train_file_path
-            else:
-                logger.ai_error("AI API调用成功，但保存全局变量训练样本时出现问题")
-        else:
-            logger.ai_error(f"AI API调用失败，将仅保留全局变量训练样本提示词文件: {var_name}")
-    
-    return prompt_file_path
-
-
 def read_global_var_info(project_name, output_dir):
     """读取全局变量信息文件"""
     global_var_info_path = os.path.join(output_dir, project_name, "global_var_info.json")
@@ -118,16 +73,129 @@ def read_global_var_info(project_name, output_dir):
         return None
 
 
-def generate_all_global_vars_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
-    """生成所有全局变量的训练样本"""
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
+async def generate_single_global_var_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    var_name,
+    ai_config,
+    semaphore
+):
+    """异步生成单个全局变量的训练样本"""
+    
+    # 构建输出目录结构
+    train_output_dir = os.path.join(output_dir, project_name, "train", "global_vars")
+    os.makedirs(train_output_dir, exist_ok=True)
+
+    train_file_path = os.path.join(train_output_dir, f"{var_name}_train.md")
+    if os.path.exists(train_file_path):
+        logger.info(f"全局变量训练样本已存在，跳过生成：{train_file_path}")
+        return None
+    
+    # 读取现有的全局变量文档文件
+    global_var_doc_content = read_global_var_doc(project_name, output_dir, var_name)
+    if global_var_doc_content is None:
+        return None
+    
+    # 生成提示词
+    prompt = generate_global_var_train_prompt(global_var_doc_content)
+    # 保存提示词到文件
+    prompt_file_path = os.path.join(train_output_dir, f"{var_name}_train_prompt.txt")
+    with open(prompt_file_path, "w", encoding="utf-8") as f:
+        f.write(prompt)
+    
+    logger.info(f"开始生成全局变量训练样本: {var_name}")
+
+    # 如果提供了AI配置，则调用AI API生成训练样本
+    if ai_config:
+        response = await async_call_ai_api_stream(
+            prompt,
+            ai_config,
+            semaphore
+        )
+        
+        if response:
+            # 保存AI生成的训练样本
+            if save_ai_response(response, train_file_path):
+                logger.info(f"完成: {var_name}")
+                return train_file_path
+            else:
+                logger.ai_error("AI API调用成功，但保存全局变量训练样本时出现问题")
+        else:
+            logger.ai_error(f"AI API调用失败，将仅保留全局变量训练样本提示词文件: {var_name}")
+    
+    return None
+
+
+async def global_var_worker(
+    queue,
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    semaphore
+):
+    """全局变量工作协程"""
+    while True:
+        var_name = await queue.get()
+        if var_name is None:
+            break
+
+        try:
+            await generate_single_global_var_train_async(
+                project_path,
+                output_dir,
+                project_name,
+                var_name,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def generate_all_global_vars_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    ignore_dirs,
+    max_concurrency=5
+):
+    """异步并发生成所有全局变量的训练样本"""
     # 读取全局变量信息
     global_var_info = read_global_var_info(project_name, output_dir)
-    if global_var_info is None:
+    if not global_var_info:
         return
-    
-    logger.info(f"开始生成全局变量的训练样本")
-    
-    generated_files = []
+
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency + 2
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            global_var_worker(
+                queue,
+                project_path,
+                output_dir,
+                project_name,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 逐个投喂全局变量（几乎不占内存）
     for item in global_var_info:
         # 检查是否应该忽略该全局变量
         defined_in = item.get("defined_in", "")
@@ -141,24 +209,15 @@ def generate_all_global_vars_train(project_path, output_dir, project_name, ai_co
         if not var_name:
             continue
             
-        try:
-            result = generate_single_global_var_train(project_path, output_dir, project_name, var_name, ai_config)
-            if result:
-                generated_files.append(result)
-        except Exception as e:
-            logger.error(f"生成全局变量 {var_name} 的训练样本时出错: {e}")
-            continue
-    
-    logger.info(f"完成生成 {len(generated_files)} 个全局变量的训练样本")
-    return generated_files
+        await queue.put(var_name)
 
+    # 等待队列清空
+    await queue.join()
 
-def should_ignore_path(file_path, ignore_dirs):
-    """检查文件路径是否应该被忽略"""
-    for ignore_dir in ignore_dirs:
-        if ignore_dir in file_path:
-            return True
-    return False
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def main():
@@ -183,14 +242,34 @@ def main():
     # 获取忽略目录列表
     ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
     
+    max_concurrency = ai_config.get("max_concurrency", 5)
+    
     # 生成全局变量训练样本
     try:
         if args.var:
             # 生成特定全局变量的训练样本
-            generate_single_global_var_train(args.project_path, output_dir, project_name, args.var, ai_config)
+            asyncio.run(
+                generate_single_global_var_train_async(
+                    args.project_path,
+                    output_dir,
+                    project_name,
+                    args.var,
+                    ai_config,
+                    asyncio.Semaphore(1)
+                )
+            )
         else:
             # 生成所有全局变量的训练样本
-            generate_all_global_vars_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
+            asyncio.run(
+                generate_all_global_vars_train_async(
+                    args.project_path,
+                    output_dir,
+                    project_name,
+                    ai_config,
+                    ignore_dirs,
+                    max_concurrency=max_concurrency
+                )
+            )
     except Exception as e:
         logger.error(f"生成全局变量训练样本时出错: {e}")
 

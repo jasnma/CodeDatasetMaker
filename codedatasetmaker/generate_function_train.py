@@ -7,12 +7,13 @@
 import os
 import argparse
 import json
+import asyncio
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
+from .utils import load_ai_config, call_ai_api, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 from .generate_function_docs import read_function_content, find_function_info
 
@@ -60,8 +61,40 @@ def generate_function_train_prompt(function_doc_content, function_source_code=No
     return prompt
 
 
-def generate_single_function_train(project_path, output_dir, project_name, file_path, function_name, file_info=None, ai_config=None):
-    """生成单个函数的训练样本"""
+def read_call_graph(project_name, output_dir):
+    """读取函数调用图文件"""
+    call_graph_path = os.path.join(output_dir, project_name, "call_graph.json")
+    
+    try:
+        with open(call_graph_path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.error(f"错误: 找不到函数调用图文件 {call_graph_path}")
+        return None
+    except Exception as e:
+        logger.error(f"错误: 读取函数调用图文件失败 {call_graph_path}: {e}")
+        return None
+
+
+def should_ignore_path(file_path, ignore_dirs):
+    """检查文件路径是否应该被忽略"""
+    for ignore_dir in ignore_dirs:
+        if ignore_dir in file_path:
+            return True
+    return False
+
+
+async def generate_single_function_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    file_path,
+    function_name,
+    file_info,
+    ai_config,
+    semaphore
+):
+    """异步生成单个函数的训练样本"""
     
     # 构建输出目录结构
     train_output_dir = os.path.join(output_dir, project_name, "train", "functions", file_path)
@@ -70,7 +103,7 @@ def generate_single_function_train(project_path, output_dir, project_name, file_
     train_file_path = os.path.join(train_output_dir, f"{function_name}_train.md")
     if os.path.exists(train_file_path):
         logger.info(f"函数训练样本已存在，跳过生成：{train_file_path}")
-        return
+        return None
     
     # 读取现有的函数文档文件
     function_doc_content = read_function_doc(project_name, output_dir, file_path, function_name)
@@ -87,20 +120,9 @@ def generate_single_function_train(project_path, output_dir, project_name, file_
             if func_info:
                 # 读取函数源代码
                 function_source_code = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
-        else:
-            # 否则读取file_info.json以获取函数的行号信息
-            file_info_path = os.path.join(output_dir, project_name, "file_info.json")
-            if os.path.exists(file_info_path):
-                with open(file_info_path, 'r', encoding='utf-8') as f:
-                    file_info = json.load(f)
-                
-                # 查找函数信息
-                file_data, func_info = find_function_info(f"{file_path}:{function_name}", file_info)
-                if func_info:
-                    # 读取函数源代码
-                    function_source_code = read_function_content(file_path, func_info["start_line"], func_info["end_line"], project_path)
     except Exception as e:
         logger.warning(f"读取函数 {function_name} 源代码时出错: {e}")
+        function_source_code = "// 无法读取函数源代码"
     
     # 生成提示词
     prompt = generate_function_train_prompt(function_doc_content, function_source_code)
@@ -109,50 +131,74 @@ def generate_single_function_train(project_path, output_dir, project_name, file_
     with open(prompt_file_path, "w", encoding="utf-8") as f:
         f.write(prompt)
     
-    logger.info(f"已生成函数训练样本提示词文件: {prompt_file_path}")
-    
+    logger.info(f"开始生成函数训练样本: {function_name}")
+
     # 如果提供了AI配置，则调用AI API生成训练样本
     if ai_config:
-        logger.info(f"正在调用AI API生成函数训练样本: {function_name}")
-        if ai_config.get("train_model", None):
-            ai_config["model"] = ai_config.get("train_model")
-            
-        response = call_ai_api(prompt, ai_config)
+        response = await async_call_ai_api_stream(
+            prompt,
+            ai_config,
+            semaphore
+        )
+        
         if response:
             # 保存AI生成的训练样本
             if save_ai_response(response, train_file_path):
-                logger.info(f"已生成函数训练样本: {train_file_path}")
+                logger.info(f"完成: {function_name}")
                 return train_file_path
             else:
                 logger.ai_error("AI API调用成功，但保存函数训练样本时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留函数训练样本提示词文件: {function_name}")
     
-    return prompt_file_path
+    return None
 
 
-def read_call_graph(project_name, output_dir):
-    """读取函数调用图文件"""
-    call_graph_path = os.path.join(output_dir, project_name, "call_graph.json")
-    
-    try:
-        with open(call_graph_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.error(f"错误: 找不到函数调用图文件 {call_graph_path}")
-        return None
-    except Exception as e:
-        logger.error(f"错误: 读取函数调用图文件失败 {call_graph_path}: {e}")
-        return None
+async def function_worker(
+    queue,
+    project_path,
+    output_dir,
+    project_name,
+    file_info,
+    ai_config,
+    semaphore
+):
+    """函数工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            file_path, func_name = item
+            await generate_single_function_train_async(
+                project_path,
+                output_dir,
+                project_name,
+                file_path,
+                func_name,
+                file_info,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
 
 
-def generate_all_functions_train(project_path, output_dir, project_name, ai_config=None, ignore_dirs=None):
-    """生成所有函数的训练样本"""
+async def generate_all_functions_train_async(
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    ignore_dirs,
+    max_concurrency=5
+):
+    """异步并发生成所有函数的训练样本"""
     # 读取函数调用图
     call_graph = read_call_graph(project_name, output_dir)
-    if call_graph is None:
+    if not call_graph:
         return
-    
+
     # 读取file_info.json
     file_info = None
     try:
@@ -162,40 +208,53 @@ def generate_all_functions_train(project_path, output_dir, project_name, ai_conf
                 file_info = json.load(f)
     except Exception as e:
         logger.warning(f"读取file_info.json时出错: {e}")
-    
-    # 获取所有函数名称
-    function_names = list(call_graph.keys())
-    
-    logger.info(f"开始生成 {len(function_names)} 个函数的训练样本")
-    
-    generated_files = []
-    for function_name in function_names:
+
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency + 2
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            function_worker(
+                queue,
+                project_path,
+                output_dir,
+                project_name,
+                file_info,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 逐个投喂函数（几乎不占内存）
+    for function_name in call_graph.keys():
         try:
             # 解析函数名称获取文件路径和函数名
             parts = function_name.split(":")
             if len(parts) >= 2:
                 file_path = parts[0]
                 func_name = parts[1]
-                if should_ignore_path(file_path, ignore_dirs):
+                
+                # 检查是否应该忽略该函数
+                if ignore_dirs and should_ignore_path(file_path, ignore_dirs):
                     logger.info(f"跳过被忽略目录中的函数: {function_name}")
                     continue
-                result = generate_single_function_train(project_path, output_dir, project_name, file_path, func_name, file_info, ai_config)
-                if result:
-                    generated_files.append(result)
+
+                await queue.put((file_path, func_name))
         except Exception as e:
-            logger.error(f"生成函数 {function_name} 的训练样本时出错: {e}")
+            logger.error(f"处理函数 {function_name} 时出错: {e}")
             continue
-    
-    logger.info(f"完成生成 {len(generated_files)} 个函数的训练样本")
-    return generated_files
 
+    # 等待队列清空
+    await queue.join()
 
-def should_ignore_path(file_path, ignore_dirs):
-    """检查文件路径是否应该被忽略"""
-    for ignore_dir in ignore_dirs:
-        if ignore_dir in file_path:
-            return True
-    return False
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def main():
@@ -219,6 +278,8 @@ def main():
     
     # 获取忽略目录列表
     ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
+
+    max_concurrency = ai_config.get("max_concurrency", 5)
     
     # 生成函数训练样本
     try:
@@ -244,12 +305,32 @@ def main():
                 except Exception as e:
                     logger.warning(f"读取file_info.json时出错: {e}")
                 # 生成特定函数的训练样本
-                generate_single_function_train(args.project_path, output_dir, project_name, file_path, func_name, file_info, ai_config)
+                asyncio.run(
+                    generate_single_function_train_async(
+                        args.project_path,
+                        output_dir,
+                        project_name,
+                        file_path,
+                        func_name,
+                        file_info,
+                        ai_config,
+                        asyncio.Semaphore(1)
+                    )
+                )
             else:
                 logger.error("错误: 函数名称格式不正确，应为 '文件路径:函数名'")
         else:
             # 生成所有函数的训练样本
-            generate_all_functions_train(args.project_path, output_dir, project_name, ai_config, ignore_dirs)
+            asyncio.run(
+                generate_all_functions_train_async(
+                    args.project_path,
+                    output_dir,
+                    project_name,
+                    ai_config,
+                    ignore_dirs,
+                    max_concurrency=max_concurrency
+                )
+            )
     except Exception as e:
         logger.error(f"生成函数训练样本时出错: {e}")
 
