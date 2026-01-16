@@ -7,6 +7,7 @@
 import json
 import os
 import argparse
+import asyncio
 from collections import defaultdict
 from .c_parser_utils import find_doc_comment_start
 
@@ -14,7 +15,7 @@ from .c_parser_utils import find_doc_comment_start
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
+from .utils import load_json_file, load_ai_config, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 
 # 定义一个变量记住已经处理过的结构体
@@ -278,8 +279,8 @@ def generate_struct_prompt(struct_info, project_path, global_var_info_data, file
     return prompt
 
 
-def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, project_path=None, global_var_info_data=None, fileinfo_data=None):
-    """生成单个结构体的文档"""
+async def generate_struct_doc_async(struct_info, project_name, output_dir, ai_config=None, project_path=None, global_var_info_data=None, fileinfo_data=None, semaphore=None):
+    """异步生成单个结构体的文档"""
     # 获取结构体名称
     struct_name = ""
     if "struct" in struct_info:
@@ -291,11 +292,11 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
     
     if not struct_name:
         logger.error("错误: 无法确定结构体名称")
-        return None
+        return
     
     if struct_name in processed_structs:
         print(f"已处理过结构体 {struct_name}")
-        return None
+        return
     
     processed_structs.add(struct_name)
     
@@ -320,7 +321,8 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
         logger.info(f"正在调用AI API生成结构体 '{struct_name}' 的文档...")
-        response = call_ai_api(prompt, ai_config)
+        # 使用异步API调用
+        response = await async_call_ai_api_stream(prompt, ai_config, semaphore)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(struct_output_dir, doc_file_name)
@@ -330,8 +332,78 @@ def generate_struct_doc(struct_info, project_name, output_dir, ai_config=None, p
                 logger.ai_error(f"AI API调用成功，但保存{struct_name}文档时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留{struct_name}提示词文件")
-    
-    return prompt_file_path
+
+
+async def struct_worker(queue, project_name, output_dir, ai_config, project_path, global_var_info_data, fileinfo_data, semaphore):
+    """结构体工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            struct_info = item
+            await generate_struct_doc_async(
+                struct_info,
+                project_name,
+                output_dir,
+                ai_config,
+                project_path,
+                global_var_info_data,
+                fileinfo_data,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def process_structs_concurrently(struct_info, project_name, output_dir, ai_config, project_path, global_var_info_data, fileinfo_data, ignore_dirs):
+    """并发处理结构体文档生成"""
+    print(f"总共 {len(struct_info)} 个结构体需要处理")
+
+    # 过滤掉需要忽略的结构体
+    filtered_structs = []
+    for struct in struct_info:
+        defined_in = struct.get("defined_in", "")
+        if not should_ignore_path(defined_in, ignore_dirs):
+            filtered_structs.append(struct)
+        else:
+            struct_name = struct.get('struct', struct.get('union', struct.get('enum', '未知')))
+            print(f"跳过被忽略目录中的结构体: {struct_name}")
+
+    max_concurrency = ai_config.get('max_concurrency', 5)
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            struct_worker(
+                queue,
+                project_name,
+                output_dir,
+                ai_config,
+                project_path,
+                global_var_info_data,
+                fileinfo_data,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 为每个结构体生成文档
+    for struct_item in filtered_structs:
+        await queue.put(struct_item)
+
+    # 等待队列清空
+    await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def should_ignore_path(file_path, ignore_dirs):
@@ -376,20 +448,20 @@ def main():
     # 加载fileinfo数据
     fileinfo_data = load_fileinfo_data(args.project_path)
     
-    # 为每个结构体生成文档
-    for struct_item in struct_info:
-        # 检查是否应该忽略该结构体
-        defined_in = struct_item.get("defined_in", "")
-        if should_ignore_path(defined_in, ignore_dirs):
-            struct_name = struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))
-            logger.info(f"跳过被忽略目录中的结构体: {struct_name}")
-            continue
-            
-        logger.info(f"正在处理结构体: {struct_item.get('struct', struct_item.get('union', struct_item.get('enum', '未知')))}")
-        try:
-            generate_struct_doc(struct_item, project_name, output_dir, ai_config, args.project_path, global_var_info_data, fileinfo_data)
-        except Exception as e:
-            print(f"处理结构体时出错: {e}")
+    # 并发处理结构体文档生成
+    logger.info(f"正在并发处理 {len(struct_info)} 个结构体的文档生成")
+    asyncio.run(
+        process_structs_concurrently(
+            struct_info,
+            project_name,
+            output_dir,
+            ai_config,
+            args.project_path,
+            global_var_info_data,
+            fileinfo_data,
+            ignore_dirs
+        )
+    )
 
 
 if __name__ == "__main__":

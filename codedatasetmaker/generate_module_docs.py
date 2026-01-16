@@ -7,15 +7,14 @@
 import json
 import os
 import argparse
+import asyncio
 from collections import defaultdict, deque
-from openai import OpenAI
-from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
+from .utils import load_json_file, load_ai_config, async_call_ai_api_stream, save_ai_response
 
 
 def get_module_dependencies(module_structure):
@@ -32,39 +31,85 @@ def get_module_dependencies(module_structure):
     return dependencies, reverse_dependencies
 
 
-def topological_sort(module_structure):
-    """使用深度优先搜索进行拓扑排序"""
+def group_modules_by_dependency(module_structure):
+    """
+    根据模块依赖关系对模块进行分层分组
+    
+    使用 Kahn 算法进行拓扑排序，将模块分为不同层级。同一层级内的模块
+    不会相互依赖，因此可以并发处理。
+    
+    Args:
+        module_structure (dict): 模块结构信息
+        
+    Returns:
+        list: 按层级分组的模块列表，每个元素是一个包含该层级所有模块的列表。
+              层级索引越小，依赖越少，应优先处理。
+    """
+    # 获取模块依赖关系
     dependencies, _ = get_module_dependencies(module_structure)
     
-    # 初始化状态
-    visited = set()
-    temp_visited = set()
-    sorted_modules = []
+    # 计算每个模块的入度（有多少个模块依赖它）
+    # 入度为0表示没有其他模块依赖它，可以优先处理
+    in_degree = defaultdict(int)
     
-    def dfs_visit(node):
-        """DFS访问节点"""
-        # 检测循环依赖
-        if node in temp_visited:
-            raise Exception(f"检测到循环依赖，涉及模块: {node}")
-        
-        if node not in visited:
-            temp_visited.add(node)
-            
-            # 访问所有依赖
-            for dependency in dependencies.get(node, []):
-                if dependency in module_structure:  # 确保依赖的模块存在
-                    dfs_visit(dependency)
-            
-            temp_visited.remove(node)
-            visited.add(node)
-            sorted_modules.append(node)
-    
-    # 对所有模块进行DFS
+    # 初始化所有模块的入度为0
     for module_name in module_structure:
-        if module_name not in visited:
-            dfs_visit(module_name)
+        in_degree[module_name] = 0
     
-    return sorted_modules
+    # 计算实际入度
+    for module_name, deps in dependencies.items():
+        for dep in deps:
+            if dep in module_structure:  # 确保依赖的模块存在
+                in_degree[dep] += 1
+    
+    # 初始化层级分组
+    levels = []
+    
+    # 找到所有入度为0的模块（没有其他模块依赖它们）
+    # 这些模块可以作为第一批并发处理的模块
+    queue = deque([module_name for module_name in in_degree if in_degree[module_name] == 0])
+    processed = set()
+    
+    # 按层级进行分组
+    while queue:
+        # 当前层级的所有模块
+        # 这些模块可以并发处理，因为它们之间没有依赖关系
+        current_level = list(queue)
+        levels.append(current_level)
+        
+        # 清空队列，准备下一层级
+        next_queue = deque()
+        
+        # 处理当前层级的所有模块
+        while queue:
+            module_name = queue.popleft()
+            processed.add(module_name)
+            
+            # 减少所有被当前模块依赖的模块的入度
+            # 当一个模块被处理后，它所依赖的模块的入度应该减少
+            for dep in dependencies.get(module_name, []):
+                if dep in module_structure and dep not in processed:
+                    in_degree[dep] -= 1
+                    # 如果入度变为0，说明所有依赖它的模块都已处理完，
+                    # 可以加入下一层级的候选队列
+                    if in_degree[dep] == 0:
+                        next_queue.append(dep)
+        
+        # 更新队列为下一层级
+        queue = next_queue
+    
+    # 检查是否有循环依赖（未处理的模块）
+    # 正常情况下，所有模块都应该被处理
+    unprocessed = set(in_degree.keys()) - processed
+    if unprocessed:
+        print(f"警告: 检测到可能存在循环依赖的模块: {unprocessed}")
+        # 将未处理的模块作为一个单独的层级
+        levels.append(list(unprocessed))
+    
+    # 颠倒层级顺序，使没有依赖的模块在最前面
+    levels.reverse()
+    
+    return levels
 
 
 def get_global_vars_for_module(module_name, module_structure, global_var_info):
@@ -158,8 +203,71 @@ def extract_dependencies_doc(output_dir, dependencies):
     return dependencies_doc
 
 
-def generate_module_doc(module_name, module_structure, global_var_info, project_path, output_dir, ai_config=None):
-    """生成单个模块的文档"""
+async def module_worker(queue, module_structure, global_var_info, project_path, output_dir, ai_config, semaphore):
+    """模块工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            module_name = item
+            await generate_module_doc_async(
+                module_name,
+                module_structure,
+                global_var_info,
+                project_path,
+                output_dir,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def process_modules_by_levels(levels, module_structure, global_var_info, project_path, output_dir, ai_config):
+    """按层级处理模块"""
+    print(f"总共 {len(levels)} 个层级需要处理")
+
+    max_concurrency = ai_config.get('max_concurrency', 5)
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            module_worker(
+                queue,
+                module_structure,
+                global_var_info,
+                project_path,
+                output_dir,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    for i, level in enumerate(levels):
+        print(f"正在处理第 {i+1}/{len(levels)} 层级，包含 {len(level)} 个模块")
+
+        # 为当前层级的每个模块生成文档
+        for module_name in level:
+            await queue.put(module_name)
+
+        # 等待队列清空，必须要待这一层的所有模块处理完成才能处理下一层
+        await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
+
+
+async def generate_module_doc_async(module_name, module_structure, global_var_info, project_path, output_dir, ai_config=None, semaphore=None):
+    """异步生成单个模块的文档"""
     # 获取模块信息
     module_info = module_structure[module_name]
     dependencies = module_info.get("dependencies", [])
@@ -178,7 +286,7 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
 
     if not source_code:
         logger.warning(f"No source code found for module: {module_name}")
-        return None
+        return
     
     # 构造元数据
     metadata = {
@@ -226,7 +334,8 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
         logger.info(f"正在调用AI API生成模块 '{module_name}' 的文档...")
-        response = call_ai_api(prompt, ai_config)
+        # 使用异步API调用
+        response = await async_call_ai_api_stream(prompt, ai_config, semaphore)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(module_output_dir, f"{module_name}_doc.md")
@@ -236,8 +345,6 @@ def generate_module_doc(module_name, module_structure, global_var_info, project_
                 logger.ai_error(f"AI API调用成功，但保存{module_name}文档时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留{module_name}提示词文件")
-    
-    return prompt_file_path
 
 
 def main():
@@ -270,21 +377,30 @@ def main():
     # 加载AI配置
     ai_config = load_ai_config(args.ai_config)
     
-    # 进行拓扑排序，确保从最底层模块开始处理
+    # 按依赖关系对模块进行分组
     try:
-        sorted_modules = topological_sort(module_structure)
-        print(f"模块处理顺序: {' -> '.join(sorted_modules)}")
+        module_levels = group_modules_by_dependency(module_structure)
+        print(f"模块分组完成，共 {len(module_levels)} 个层级")
+        for i, level in enumerate(module_levels):
+            print(f"  层级 {i}: {len(level)} 个模块")
+            # 显示前几个模块作为示例
+            for j, module in enumerate(level[:3]):
+                print(f"    - {module}")
+            if len(level) > 3:
+                print(f"    ... 还有 {len(level) - 3} 个模块")
     except Exception as e:
         print(f"错误: {e}")
         return
-    
-    # 为每个模块生成文档
-    for module_name in sorted_modules:
-        print(f"正在处理模块: {module_name}")
-        try:
-            generate_module_doc(module_name, module_structure, global_var_info, args.project_path, output_dir, ai_config)
-        except Exception as e:
-            print(f"处理模块 '{module_name}' 时出错: {e}")
+
+    # 按层级处理模块
+    asyncio.run(
+        process_modules_by_levels(module_levels,
+                                 module_structure,
+                                 global_var_info,
+                                 args.project_path,
+                                 output_dir,
+                                 ai_config)
+    )
 
 if __name__ == "__main__":
     main()

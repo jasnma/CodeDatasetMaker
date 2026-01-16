@@ -7,15 +7,13 @@
 import json
 import os
 import argparse
-from collections import defaultdict, deque
-from openai import OpenAI
-from openai import APIError, APIConnectionError, RateLimitError
+import asyncio
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
+from .utils import load_json_file, load_ai_config, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 
 # 定义一个变量记住已经处理过的宏，避免重复处理
@@ -228,13 +226,13 @@ def generate_macro_prompt(macro_info, project_path):
     return prompt
 
 
-def generate_macro_doc(macro_info, output_dir, project_name, project_path, ai_config=None):
-    """生成单个宏的文档"""
+async def generate_macro_doc_async(macro_info, output_dir, project_name, project_path, ai_config=None, semaphore=None):
+    """异步生成单个宏的文档"""
     macro_name = macro_info["macro"]
 
     if macro_name in processed_macros:
         print(f"已处理过宏 {macro_name}")
-        return None
+        return
     
     processed_macros.add(macro_name)
     
@@ -268,7 +266,8 @@ def generate_macro_doc(macro_info, output_dir, project_name, project_path, ai_co
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
         logger.info(f"正在调用AI API生成宏 '{macro_name}' 的文档...")
-        response = call_ai_api(prompt, ai_config)
+        # 使用异步API调用
+        response = await async_call_ai_api_stream(prompt, ai_config, semaphore)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(macro_output_dir, doc_file_name)
@@ -278,8 +277,73 @@ def generate_macro_doc(macro_info, output_dir, project_name, project_path, ai_co
                 logger.ai_error(f"AI API调用成功，但保存{macro_name}文档时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留{macro_name}提示词文件")
-    
-    return prompt_file_path
+
+
+async def macro_worker(queue, output_dir, project_name, project_path, ai_config, semaphore):
+    """宏工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            macro_info = item
+            await generate_macro_doc_async(
+                macro_info,
+                output_dir,
+                project_name,
+                project_path,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def process_macros_concurrently(macro_info, output_dir, project_name, project_path, ai_config, ignore_dirs):
+    """并发处理宏文档生成"""
+    print(f"总共 {len(macro_info)} 个宏需要处理")
+
+    # 过滤掉需要忽略的宏
+    filtered_macros = []
+    for macro in macro_info:
+        defined_in = macro.get("defined_in", "")
+        if not should_ignore_path(defined_in, ignore_dirs):
+            filtered_macros.append(macro)
+        else:
+            print(f"跳过被忽略目录中的宏: {macro['macro']}")
+
+    max_concurrency = ai_config.get('max_concurrency', 5)
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            macro_worker(
+                queue,
+                output_dir,
+                project_name,
+                project_path,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 为每个宏生成文档
+    for macro in filtered_macros:
+        await queue.put(macro)
+
+    # 等待队列清空
+    await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def should_ignore_path(file_path, ignore_dirs):
@@ -318,19 +382,18 @@ def main():
     # 获取忽略目录列表
     ignore_dirs = get_ignore_dirs(ai_config) if ai_config else []
     
-    # 为每个宏生成文档
-    for macro in macro_info:
-        # 检查是否应该忽略该宏
-        defined_in = macro.get("defined_in", "")
-        if should_ignore_path(defined_in, ignore_dirs):
-            print(f"跳过被忽略目录中的宏: {macro['macro']}")
-            continue
-            
-        print(f"正在处理宏: {macro['macro']}")
-        try:
-            generate_macro_doc(macro, output_dir, project_name, args.project_path, ai_config)
-        except Exception as e:
-            print(f"处理宏 '{macro['macro']}' 时出错: {e}")
+    # 并发处理宏文档生成
+    logger.info(f"正在并发处理 {len(macro_info)} 个宏的文档生成")
+    asyncio.run(
+        process_macros_concurrently(
+            macro_info,
+            output_dir,
+            project_name,
+            args.project_path,
+            ai_config,
+            ignore_dirs
+        )
+    )
 
 
 if __name__ == "__main__":

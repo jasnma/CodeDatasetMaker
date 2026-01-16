@@ -8,16 +8,14 @@ import json
 import os
 import sys
 import argparse
-from collections import defaultdict
-from openai import OpenAI
-from openai import APIError, APIConnectionError, RateLimitError
+import asyncio
 from .c_parser_utils import find_doc_comment_start
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response
+from .utils import load_json_file, load_ai_config, async_call_ai_api_stream, save_ai_response
 
 # 定义一个变量记住已经处理过的全局变量
 processed_vars = set()
@@ -222,18 +220,18 @@ def generate_var_prompt(var_info, project_path, fileinfo_data):
     return prompt
 
 
-def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project_path=None, fileinfo_data=None):
-    """生成单个全局变量的文档"""
+async def generate_var_doc_async(var_info, project_name, output_dir, ai_config=None, project_path=None, fileinfo_data=None, semaphore=None):
+    """异步生成单个全局变量的文档"""
     # 获取全局变量名称
     var_name = var_info.get("var", "")
     
     if not var_name:
         logger.error("错误: 无法确定全局变量名称")
-        return None
+        return
     
     if var_name in processed_vars:
         print(f"已处理过全局变量 {var_name}")
-        return None
+        return
     
     processed_vars.add(var_name)
     
@@ -258,7 +256,8 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
         print(f"正在调用AI API生成全局变量 '{var_name}' 的文档...")
-        response = call_ai_api(prompt, ai_config)
+        # 使用异步API调用
+        response = await async_call_ai_api_stream(prompt, ai_config, semaphore)
         if response:
             # 保存AI生成的文档
             doc_file_path = os.path.join(var_output_dir, doc_file_name)
@@ -268,8 +267,66 @@ def generate_var_doc(var_info, project_name, output_dir, ai_config=None, project
                 logger.ai_error(f"AI API调用成功，但保存{var_name}文档时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留{var_name}提示词文件")
-    
-    return prompt_file_path
+
+
+async def var_worker(queue, project_name, output_dir, ai_config, project_path, fileinfo_data, semaphore):
+    """全局变量工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            var_info = item
+            await generate_var_doc_async(
+                var_info,
+                project_name,
+                output_dir,
+                ai_config,
+                project_path,
+                fileinfo_data,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def process_vars_concurrently(global_var_info, project_name, output_dir, ai_config, project_path, fileinfo_data):
+    """并发处理全局变量文档生成"""
+    print(f"总共 {len(global_var_info)} 个全局变量需要处理")
+
+    max_concurrency = ai_config.get('max_concurrency', 5)
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            var_worker(
+                queue,
+                project_name,
+                output_dir,
+                ai_config,
+                project_path,
+                fileinfo_data,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    # 为每个全局变量生成文档
+    for var_item in global_var_info:
+        await queue.put(var_item)
+
+    # 等待队列清空
+    await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
 
 
 def main():
@@ -300,13 +357,18 @@ def main():
     # 加载fileinfo数据
     fileinfo_data = load_fileinfo_data(args.project_path)
     
-    # 为每个全局变量生成文档
-    for var_item in global_var_info:
-        logger.info(f"正在处理全局变量: {var_item.get('var', '未知')}")
-        try:
-            generate_var_doc(var_item, project_name, output_dir, ai_config, args.project_path, fileinfo_data)
-        except Exception as e:
-            logger.error(f"处理全局变量时出错: {e}")
+    # 并发处理全局变量文档生成
+    logger.info(f"正在并发处理 {len(global_var_info)} 个全局变量的文档生成")
+    asyncio.run(
+        process_vars_concurrently(
+            global_var_info,
+            project_name,
+            output_dir,
+            ai_config,
+            args.project_path,
+            fileinfo_data
+        )
+    )
 
 
 if __name__ == "__main__":
