@@ -165,20 +165,15 @@ def generate_struct_prompt(struct_info, project_path, global_var_info_data, file
     """生成结构体文档提示词"""
     # 读取提示词模板
     try:
-        # 首先尝试在当前目录查找模板文件
-        with open("struct_doc_prompt_template.txt", "r", encoding="utf-8") as f:
+        # 在prompt_template目录中查找模板文件
+        template_path = os.path.join(os.path.dirname(__file__), "..", "prompt_template", "struct_doc_prompt_template.txt")
+        with open(template_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
     except FileNotFoundError:
-        # 如果在当前目录找不到，尝试在codedatasetmaker目录中查找
-        try:
-            template_path = os.path.join(os.path.dirname(__file__), "struct_doc_prompt_template.txt")
-            with open(template_path, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except FileNotFoundError:
-            # 如果都找不到，报错退出
-            logger.error("错误: 找不到结构体文档提示词模板文件 'struct_doc_prompt_template.txt'")
-            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
-            raise
+        # 如果找不到，报错退出
+        logger.error("错误: 找不到结构体文档提示词模板文件 'struct_doc_prompt_template.txt'")
+        logger.error("请确保模板文件存在于 prompt_template 目录中")
+        raise
     
     # 获取结构体名称
     struct_name = ""

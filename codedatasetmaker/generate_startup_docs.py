@@ -123,20 +123,15 @@ def generate_startup_prompt(call_tree, main_function_content, called_functions_c
     """生成启动流程文档提示词"""
     # 读取提示词模板
     try:
-        # 首先尝试在当前目录查找模板文件
-        with open("startup_doc_prompt_template.txt", "r", encoding="utf-8") as f:
+        # 在prompt_template目录中查找模板文件
+        template_path = os.path.join(os.path.dirname(__file__), "..", "prompt_template", "startup_doc_prompt_template.txt")
+        with open(template_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
     except FileNotFoundError:
-        # 如果在当前目录找不到，尝试在codedatasetmaker目录中查找
-        try:
-            template_path = os.path.join(os.path.dirname(__file__), "startup_doc_prompt_template.txt")
-            with open(template_path, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except FileNotFoundError:
-            # 如果都找不到，报错退出
-            logger.error("错误: 找不到启动流程文档提示词模板文件 'startup_doc_prompt_template.txt'")
-            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
-            raise
+        # 如果找不到，报错退出
+        logger.error("错误: 找不到启动流程文档提示词模板文件 'startup_doc_prompt_template.txt'")
+        logger.error("请确保模板文件存在于 prompt_template 目录中")
+        raise
     
     # 准备填充模板的数据
     call_tree_str = json.dumps(dict(call_tree), indent=2, ensure_ascii=False)

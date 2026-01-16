@@ -41,20 +41,15 @@ def generate_macro_train_prompt(macro_doc_content, macro_source_code=None):
     """生成宏定义训练样本提示词"""
     # 读取提示词模板
     try:
-        # 首先尝试在当前目录查找模板文件
-        with open("macro_train_prompt_template.txt", "r", encoding="utf-8") as f:
+        # 在prompt_template目录中查找模板文件
+        template_path = os.path.join(os.path.dirname(__file__), "..", "prompt_template", "macro_train_prompt_template.txt")
+        with open(template_path, "r", encoding="utf-8") as f:
             prompt_template = f.read()
     except FileNotFoundError:
-        # 如果在当前目录找不到，尝试在codedatasetmaker目录中查找
-        try:
-            template_path = os.path.join(os.path.dirname(__file__), "macro_train_prompt_template.txt")
-            with open(template_path, "r", encoding="utf-8") as f:
-                prompt_template = f.read()
-        except FileNotFoundError:
-            # 如果都找不到，报错退出
-            logger.error("错误: 找不到宏定义训练样本提示词模板文件 'macro_train_prompt_template.txt'")
-            logger.error("请确保模板文件存在于当前目录或 codedatasetmaker 目录中")
-            raise
+        # 如果找不到，报错退出
+        logger.error("错误: 找不到宏定义训练样本提示词模板文件 'macro_train_prompt_template.txt'")
+        logger.error("请确保模板文件存在于 prompt_template 目录中")
+        raise
     
     # 填充模板
     prompt = prompt_template.format(
