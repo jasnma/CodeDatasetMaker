@@ -7,16 +7,14 @@
 import json
 import os
 import argparse
+import asyncio
 from collections import defaultdict, deque
-from openai import OpenAI
-from openai import APIError, APIConnectionError, RateLimitError
 
 # 导入日志模块
 from . import logger
 
 # 导入工具函数
-from .utils import load_json_file, load_ai_config, call_ai_api, save_ai_response, get_ignore_dirs
-
+from .utils import load_json_file, load_ai_config, async_call_ai_api_stream, save_ai_response, get_ignore_dirs
 
 # 定义一个变量记住已经处理过的函数，有些定义在头文件中的函数
 # 重复被处理，增加这个变量可以避免重复处理
@@ -43,41 +41,6 @@ def get_function_dependencies(call_graph):
             reverse_dependencies[callee].append(caller)
     
     return dependencies, reverse_dependencies
-
-
-def topological_sort_functions(call_graph):
-    """对函数进行拓扑排序，确保底层函数先处理"""
-    dependencies, _ = get_function_dependencies(call_graph)
-    
-    # 初始化状态
-    visited = set()
-    temp_visited = set()
-    sorted_functions = []
-    
-    def dfs_visit(node):
-        """DFS访问节点"""
-        # 检测循环依赖
-        if node in temp_visited:
-            print(f"警告: 检测到循环依赖，涉及函数: {node}")
-            return
-        
-        if node not in visited:
-            temp_visited.add(node)
-            
-            # 访问所有依赖
-            for dependency in dependencies.get(node, []):
-                dfs_visit(dependency)
-            
-            temp_visited.remove(node)
-            visited.add(node)
-            sorted_functions.append(node)
-    
-    # 对所有函数进行DFS
-    for function_name in call_graph:
-        if function_name not in visited:
-            dfs_visit(function_name)
-    
-    return sorted_functions
 
 
 def find_function_info(function_name, file_info):
@@ -214,7 +177,17 @@ def generate_function_prompt(function_name, function_content, callees, callees_d
     return prompt
 
 
-def generate_function_doc(function_name, call_graph, reverse_call_graph, file_info, project_path, output_dir, project_name, ai_config=None):
+async def generate_function_doc_async(
+    function_name,
+    call_graph,
+    reverse_call_graph,
+    file_info,
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    semaphore
+):
     """生成单个函数的文档"""
     # 获取函数信息
     file_data, func_info = find_function_info(function_name, file_info)
@@ -275,7 +248,12 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
     # 如果提供了AI配置，则调用AI API生成文档
     if ai_config:
         logger.info(f"正在调用AI API生成函数 '{function_name}' 的文档...")
-        response = call_ai_api(prompt, ai_config)
+        response = await async_call_ai_api_stream(
+            prompt,
+            ai_config,
+            semaphore
+        )
+
         if response:
             # 保存AI生成的文档
             if save_ai_response(response, doc_file_path):
@@ -284,8 +262,6 @@ def generate_function_doc(function_name, call_graph, reverse_call_graph, file_in
                 logger.ai_error(f"AI API调用成功，但保存{function_name}文档时出现问题")
         else:
             logger.ai_error(f"AI API调用失败，将仅保留{function_name}提示词文件")
-    
-    return prompt_file_path
 
 
 def should_ignore_path(file_path, ignore_dirs):
@@ -294,6 +270,174 @@ def should_ignore_path(file_path, ignore_dirs):
         if ignore_dir in file_path:
             return True
     return False
+
+
+async def function_worker(
+    queue,
+    call_graph,
+    reverse_call_graph,
+    file_info,
+    project_path,
+    output_dir,
+    project_name,
+    ai_config,
+    semaphore
+):
+    """函数工作协程"""
+    while True:
+        item = await queue.get()
+        if item is None:
+            break
+
+        try:
+            function_name = item
+            await generate_function_doc_async(
+                function_name,
+                call_graph,
+                reverse_call_graph,
+                file_info,
+                project_path,
+                output_dir,
+                project_name,
+                ai_config,
+                semaphore
+            )
+        finally:
+            queue.task_done()
+
+
+async def process_functions_by_levels(levels, call_graph, reverse_call_graph, file_info, project_path, output_dir, project_name, ai_config, ignore_dirs):
+    """按层级处理函数"""
+    print(f"总共 {len(levels)} 个层级需要处理")
+
+    max_concurrency = ai_config.get('max_concurrency', 5)
+    queue = asyncio.Queue(maxsize=max_concurrency * 2)
+    semaphore = asyncio.Semaphore(max_concurrency)
+    num_workers = max_concurrency
+
+    # 启动固定数量 worker
+    workers = [
+        asyncio.create_task(
+            function_worker(
+                queue,
+                call_graph,
+                reverse_call_graph,
+                file_info,
+                project_path,
+                output_dir,
+                project_name,
+                ai_config,
+                semaphore
+            )
+        )
+        for _ in range(num_workers)
+    ]
+
+    for i, level in enumerate(levels):
+        print(f"正在处理第 {i+1}/{len(levels)} 层级，包含 {len(level)} 个函数")
+
+        # 为当前层级的每个函数生成文档
+        for function_name in level:
+            await queue.put(function_name)
+
+        # 等待队列清空，必须要待这一层的所有函数处理完成才能处理下一层
+        await queue.join()
+
+    # 关闭 worker
+    for _ in workers:
+        await queue.put(None)
+    await asyncio.gather(*workers)
+
+
+def group_functions_by_dependency(call_graph):
+    """
+    根据函数依赖关系对函数进行分层分组
+    
+    使用 Kahn 算法进行拓扑排序，将函数分为不同层级。同一层级内的函数
+    不会相互依赖，因此可以并发处理。
+    
+    Args:
+        call_graph (dict): 函数调用图，格式为 {caller: [callee1, callee2, ...]}
+            caller: 调用其他函数的函数
+            callee: 被调用的函数
+        
+    Returns:
+        list: 按层级分组的函数列表，每个元素是一个包含该层级所有函数的列表。
+              层级索引越小，依赖越少，应优先处理。
+              
+    Example:
+        >>> call_graph = {
+        ...     "file1.c:main": ["file1.c:init", "file2.c:process_data"],
+        ...     "file1.c:init": ["file3.c:setup"],
+        ...     "file2.c:process_data": ["file3.c:setup"],
+        ...     "file3.c:setup": []
+        ... }
+        >>> levels = group_functions_by_dependency(call_graph)
+        >>> len(levels)
+        3
+    """
+    # 计算每个函数的入度（有多少个函数调用它）
+    # 入度为0表示没有其他函数依赖它，可以优先处理
+    in_degree = defaultdict(int)
+    
+    # 初始化所有函数的入度为0
+    for func in call_graph:
+        in_degree[func] = 0
+    
+    # 计算实际入度
+    for caller, callees in call_graph.items():
+        for callee in callees:
+            in_degree[callee] += 1
+    
+    # 初始化层级分组
+    levels = []
+    
+    # 找到所有入度为0的函数（没有其他函数调用它们）
+    # 这些函数可以作为第一批并发处理的函数
+    queue = deque([func for func in in_degree if in_degree[func] == 0])
+    processed = set()
+    
+    # 按层级进行分组
+    while queue:
+        # 当前层级的所有函数
+        # 这些函数可以并发处理，因为它们之间没有依赖关系
+        current_level = list(queue)
+        levels.append(current_level)
+        
+        # 清空队列，准备下一层级
+        next_queue = deque()
+        
+        # 处理当前层级的所有函数
+        while queue:
+            func = queue.popleft()
+            processed.add(func)
+            
+            # 减少所有被当前函数调用的函数的入度
+            # 当一个函数被处理后，它所依赖的函数的入度应该减少
+            for callee in call_graph.get(func, []):
+                if callee not in processed:
+                    in_degree[callee] -= 1
+                    # 如果入度变为0，说明所有依赖它的函数都已处理完，
+                    # 可以加入下一层级的候选队列
+                    if in_degree[callee] == 0:
+                        next_queue.append(callee)
+        
+        # 更新队列为下一层级
+        queue = next_queue
+    
+    # 检查是否有循环依赖（未处理的函数）
+    # 正常情况下，所有函数都应该被处理
+    unprocessed = set(in_degree.keys()) - processed
+    if unprocessed:
+        print(f"警告: 检测到可能存在循环依赖的函数: {unprocessed}")
+        # 将未处理的函数作为一个单独的层级
+        # 在实际应用中，可能需要特殊处理这些函数
+        levels.append(list(unprocessed))
+    
+    # 颠倒层级顺序，使没有依赖的函数在最前面
+    levels.reverse()
+    
+    return levels
 
 
 def main():
@@ -332,27 +476,33 @@ def main():
     # 构建反向调用图
     reverse_call_graph = build_call_graph_reverse(call_graph)
     
-    # 进行拓扑排序，确保从最底层函数开始处理
+    # 按依赖关系对函数进行分组
     try:
-        sorted_functions = topological_sort_functions(call_graph)
-        print(f"函数处理顺序: {' -> '.join(sorted_functions[:10])}{'...' if len(sorted_functions) > 10 else ''}")
+        function_levels = group_functions_by_dependency(call_graph)
+        print(f"函数分组完成，共 {len(function_levels)} 个层级")
+        for i, level in enumerate(function_levels):
+            print(f"  层级 {i}: {len(level)} 个函数")
+            # 显示前几个函数作为示例
+            for j, func in enumerate(level[:3]):
+                print(f"    - {func}")
+            if len(level) > 3:
+                print(f"    ... 还有 {len(level) - 3} 个函数")
     except Exception as e:
         print(f"错误: {e}")
         return
 
-    # 为每个函数生成文档
-    for function_name in sorted_functions:
-        # 检查是否应该忽略该函数
-        file_path = function_name.split(":")[0]  # 获取文件路径部分
-        if should_ignore_path(file_path, ignore_dirs):
-            print(f"跳过被忽略目录中的函数: {function_name}")
-            continue
-            
-        print(f"正在处理函数: {function_name}")
-        try:
-            generate_function_doc(function_name, call_graph, reverse_call_graph, file_info, args.project_path, output_dir, project_name, ai_config)
-        except Exception as e:
-            print(f"处理函数 '{function_name}' 时出错: {e}")
+    # 按层级处理函数
+    asyncio.run(
+        process_functions_by_levels(function_levels,
+                                    call_graph,
+                                    reverse_call_graph,
+                                    file_info,
+                                    args.project_path,
+                                    output_dir,
+                                    project_name,
+                                    ai_config,
+                                    ignore_dirs)
+    )
 
 
 if __name__ == "__main__":
